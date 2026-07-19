@@ -1,8 +1,11 @@
 package io.github.cl0ura.hypericonpack.ui
 
-import android.os.Handler
-import android.os.Looper
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,6 +27,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -38,11 +42,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import io.github.cl0ura.hypericonpack.config.IconPackConfig
 import io.github.cl0ura.hypericonpack.config.IconSettingsStore
 import io.github.cl0ura.hypericonpack.iconpack.IconPackDescriptor
 import io.github.cl0ura.hypericonpack.iconpack.IconPackDiscovery
 import io.github.cl0ura.hypericonpack.systemtheme.HyperOsIconArchiveConverter
+import io.github.cl0ura.hypericonpack.systemtheme.IconArchiveConversionController
+import io.github.cl0ura.hypericonpack.systemtheme.IconArchiveConversionRequest
+import io.github.cl0ura.hypericonpack.systemtheme.IconArchiveConversionState
 import io.github.cl0ura.hypericonpack.systemtheme.PackageThemeArchiveUpdateScheduler
 import io.github.cl0ura.hypericonpack.systemtheme.RootThemeIconInstaller
 import kotlinx.coroutines.Dispatchers
@@ -272,9 +280,8 @@ private fun IconArchiveCreatorPage(
 ) {
     val context = LocalContext.current.applicationContext
     val settingsStore = remember(context) { IconSettingsStore(context) }
-    val coroutineScope = rememberCoroutineScope()
-    val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val initialConfig = remember { settingsStore.read() }
+    val conversionState by IconArchiveConversionController.state.collectAsState()
     val sources = remember(iconPacks) {
         listOf(
             IconSource(
@@ -283,52 +290,63 @@ private fun IconArchiveCreatorPage(
             ),
         ) + iconPacks.map { IconSource(packageName = it.packageName, label = it.label) }
     }
-    var selectedSource by remember(sources) {
-        mutableStateOf(
-            sources.firstOrNull { it.packageName == initialConfig.packageName } ?: sources.firstOrNull(),
-        )
+    var selectedSourcePackage by rememberSaveable {
+        mutableStateOf(initialConfig.packageName ?: HyperOsIconArchiveConverter.ORIGINAL_ICON_PACKAGE)
     }
+    val selectedSource = sources.firstOrNull { it.packageName == selectedSourcePackage }
     var scale by rememberSaveable { mutableFloatStateOf(initialConfig.fallbackScaleMultiplier) }
     var globalMonet by rememberSaveable { mutableStateOf(initialConfig.globalMonetIcons) }
     var monetCustomColors by rememberSaveable { mutableStateOf(initialConfig.monetCustomColors) }
     var monetBackgroundColor by rememberSaveable { mutableStateOf(initialConfig.monetBackgroundColor) }
     var monetForegroundColor by rememberSaveable { mutableStateOf(initialConfig.monetForegroundColor) }
     var selectorOpen by rememberSaveable { mutableStateOf(false) }
-    var converting by remember { mutableStateOf(false) }
-    var progress by remember { mutableStateOf<HyperOsIconArchiveConverter.ConversionProgress?>(null) }
-    var summary by remember { mutableStateOf("转换完成后会自动保存为图标存档。") }
+    var pendingRequest by remember { mutableStateOf<IconArchiveConversionRequest?>(null) }
+    val runningState = conversionState as? IconArchiveConversionState.Running
+    val converting = runningState != null
+    val progress = runningState?.progress
+    val summary = when (val state = conversionState) {
+        IconArchiveConversionState.Idle -> "转换完成后会自动保存为图标存档。"
+        is IconArchiveConversionState.Running -> "正在转换 ${state.request.sourceLabel}…"
+        is IconArchiveConversionState.Succeeded -> "已保存 · ${state.convertedIcons} 个图标"
+        is IconArchiveConversionState.Failed -> "转换失败：${state.message}"
+    }
+
+    fun launchConversion(request: IconArchiveConversionRequest) {
+        IconArchiveConversionController.start(context, request)
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) {
+        pendingRequest?.let(::launchConversion)
+        pendingRequest = null
+    }
 
     fun startConversion() {
         val source = selectedSource ?: return
         if (converting) return
-        coroutineScope.launch {
-            converting = true
-            progress = null
-            summary = "正在转换 ${source.label}…"
-            val result = withContext(Dispatchers.Default) {
-                runCatching {
-                    HyperOsIconArchiveConverter.convert(
-                        context = context,
-                        iconPackPackage = source.packageName,
-                        fallbackScaleMultiplier = scale,
-                        globalMonetIcons = globalMonet,
-                        monetCustomColors = monetCustomColors,
-                        monetBackgroundColor = monetBackgroundColor,
-                        monetForegroundColor = monetForegroundColor,
-                        includeInstalledAppFallbacks = true,
-                        onProgress = { latest -> mainHandler.post { progress = latest } },
-                    )
-                }
-            }
-            summary = result.fold(
-                onSuccess = { archive ->
-                    "已保存 · ${archive.convertedExplicitMappings + archive.convertedPackageDefaults} 个图标"
-                },
-                onFailure = { error -> "转换失败：${error.message ?: error.javaClass.simpleName}" },
-            )
-            converting = false
-            onArchiveSaved()
+        val request = IconArchiveConversionRequest(
+            iconPackPackage = source.packageName,
+            sourceLabel = source.label,
+            fallbackScaleMultiplier = scale,
+            globalMonetIcons = globalMonet,
+            monetCustomColors = monetCustomColors,
+            monetBackgroundColor = monetBackgroundColor,
+            monetForegroundColor = monetForegroundColor,
+        )
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingRequest = request
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            launchConversion(request)
         }
+    }
+
+    LaunchedEffect(conversionState) {
+        if (conversionState is IconArchiveConversionState.Succeeded) onArchiveSaved()
     }
 
     SettingsSecondaryPage(title = "制作图标包", rootPadding = rootPadding, onBack = onBack) { pagePadding ->
@@ -340,7 +358,7 @@ private fun IconArchiveCreatorPage(
                 SettingsSection("转换参数") {
                     ArrowPreference(
                         title = "图标来源",
-                        summary = selectedSource?.label ?: "尚未选择",
+                        summary = selectedSource?.label ?: selectedSourcePackage,
                         onClick = { selectorOpen = true },
                         enabled = !converting,
                     )
@@ -430,7 +448,7 @@ private fun IconArchiveCreatorPage(
         selected = selectedSource,
         onDismiss = { selectorOpen = false },
         onSelected = {
-            selectedSource = it
+            selectedSourcePackage = it.packageName
             selectorOpen = false
         },
     )

@@ -33,9 +33,18 @@ internal object RootAccess {
     /** User-initiated full reboot for surfaces whose caches survive process restarts. */
     fun rebootSystem(): Result = runFixed("svc power reboot")
 
-    /** Reads only recent records related to this module and its injected processes. */
-    fun readModuleLogs(): Result = runFixed(
+    /** Reads app-process records emitted with the module's dedicated Android tag. */
+    fun readAppLogs(): Result = runFixed(
         "logcat -d -v threadtime HyperIconPack:V '*:S' | tail -n 500",
+        timeoutSeconds = 20L,
+    )
+
+    /** Reads LSPosed bridge output from both logcat and LSPosed's module log files. */
+    fun readXposedLogs(): Result = runFixed(
+        "(logcat -d -v threadtime LSPosed-Bridge:V LSPosed:V Xposed:V '*:S' 2>/dev/null; " +
+            "tail -n 3000 /data/adb/lspd/log/modules_*.log " +
+            "/data/adb/lspd/log/verbose_*.log 2>/dev/null) | " +
+            "grep -F HyperIconPack | tail -n 500",
         timeoutSeconds = 20L,
     )
 

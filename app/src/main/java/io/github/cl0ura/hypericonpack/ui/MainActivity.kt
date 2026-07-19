@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -59,6 +60,7 @@ private fun HyperIconRoot(
     onThemePreferencesChanged: (UiThemePreferences) -> Unit,
 ) {
     var selectedPage by rememberSaveable { mutableIntStateOf(HOME_PAGE) }
+    val pageStateHolder = rememberSaveableStateHolder()
     val blurActive = themePreferences.enableBlur &&
         themePreferences.floatingBottomBar &&
         themePreferences.floatingBottomBarBlur &&
@@ -74,13 +76,15 @@ private fun HyperIconRoot(
     }
     val pages: @Composable (PaddingValues) -> Unit = { rootPadding ->
         Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
-            when (selectedPage) {
-                HOME_PAGE -> ModuleHomeScreen(rootPadding = rootPadding)
-                SETTINGS_PAGE -> SettingsNavigationScreen(
-                    rootPadding = rootPadding,
-                    themePreferences = themePreferences,
-                    onThemePreferencesChanged = onThemePreferencesChanged,
-                )
+            pageStateHolder.SaveableStateProvider(selectedPage) {
+                when (selectedPage) {
+                    HOME_PAGE -> ModuleHomeScreen(rootPadding = rootPadding)
+                    SETTINGS_PAGE -> SettingsNavigationScreen(
+                        rootPadding = rootPadding,
+                        themePreferences = themePreferences,
+                        onThemePreferencesChanged = onThemePreferencesChanged,
+                    )
+                }
             }
         }
     }

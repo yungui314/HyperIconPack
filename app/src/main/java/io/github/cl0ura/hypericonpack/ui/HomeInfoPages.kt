@@ -44,6 +44,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.TabRow
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.preference.ArrowPreference
@@ -57,19 +58,29 @@ internal fun ModuleLogsPage(
     val context = LocalContext.current
     val clipboard = remember(context) { context.getSystemService(ClipboardManager::class.java) }
     var refreshGeneration by rememberSaveable { mutableIntStateOf(0) }
+    var selectedLogSource by rememberSaveable { mutableIntStateOf(0) }
     var loading by remember { mutableStateOf(true) }
     var logs by remember { mutableStateOf("") }
     var entries by remember { mutableStateOf(emptyList<ModuleLogEntry>()) }
     var status by remember { mutableStateOf("正在读取日志…") }
 
-    LaunchedEffect(refreshGeneration) {
+    LaunchedEffect(refreshGeneration, selectedLogSource) {
         loading = true
-        val result = withContext(Dispatchers.IO) { RootAccess.readModuleLogs() }
+        logs = ""
+        entries = emptyList()
+        status = "正在读取日志…"
+        val result = withContext(Dispatchers.IO) {
+            if (selectedLogSource == 0) RootAccess.readAppLogs() else RootAccess.readXposedLogs()
+        }
         logs = result.output
         entries = if (result.success) parseModuleLogs(result.output) else emptyList()
         status = when {
             !result.success -> "读取失败：${result.output.ifBlank { "请检查 Root 授权" }}"
-            entries.isEmpty() -> "暂时没有本模块的近期日志。"
+            entries.isEmpty() -> if (selectedLogSource == 0) {
+                "暂时没有应用进程的近期日志。"
+            } else {
+                "暂时没有 LSPosed 中本模块的近期日志。"
+            }
             else -> "已读取最近 ${entries.size} 条相关记录。"
         }
         loading = false
@@ -82,6 +93,14 @@ internal fun ModuleLogsPage(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
+                TabRow(
+                    tabs = listOf("应用日志", "Xposed 日志"),
+                    selectedTabIndex = selectedLogSource,
+                    onTabSelected = { selectedLogSource = it },
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            }
+            item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(18.dp)) {
                         Text(
@@ -90,7 +109,11 @@ internal fun ModuleLogsPage(
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                         Text(
-                            text = "Android 使用固定大小的环形日志缓冲区，旧记录会自动覆盖，不会持续占用存储空间。",
+                            text = if (selectedLogSource == 0) {
+                                "显示应用与后台转换任务的运行记录。Android 日志缓冲区会自动覆盖旧内容。"
+                            } else {
+                                "显示 LSPosed 注入系统桌面、系统界面和设置等进程时记录的模块日志。"
+                            },
                             style = MiuixTheme.textStyles.footnote1,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             modifier = Modifier.padding(top = 6.dp),
@@ -106,7 +129,8 @@ internal fun ModuleLogsPage(
                                 text = "复制全部",
                                 enabled = logs.isNotBlank() && !loading,
                                 onClick = {
-                                    clipboard.setPrimaryClip(ClipData.newPlainText("Hyper Icon Pack 日志", logs))
+                                    val label = if (selectedLogSource == 0) "应用日志" else "Xposed 日志"
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("Hyper Icon Pack $label", logs))
                                     status = "日志已复制到剪贴板。"
                                 },
                             )
@@ -179,11 +203,13 @@ private fun LogEntryContent(entry: ModuleLogEntry) {
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
-            Text(
-                text = "PID ${entry.processId} · TID ${entry.threadId}",
-                style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
+            if (entry.processId != "-" || entry.threadId != "-") {
+                Text(
+                    text = "PID ${entry.processId} · TID ${entry.threadId}",
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
             SelectionContainer {
                 Text(
                     text = entry.message,
@@ -209,6 +235,7 @@ private fun parseModuleLogs(raw: String): List<ModuleLogEntry> {
     val entries = mutableListOf<ModuleLogEntry>()
     raw.lineSequence().forEach { line ->
         val match = THREADTIME_LOG_PATTERN.matchEntire(line)
+        val xposedMatch = XPOSED_LOG_PATTERN.matchEntire(line)
         if (match != null) {
             entries += ModuleLogEntry(
                 id = entries.size,
@@ -219,10 +246,30 @@ private fun parseModuleLogs(raw: String): List<ModuleLogEntry> {
                 tag = match.groupValues[6].trim(),
                 message = match.groupValues[7].trim(),
             )
-        } else if (line.isNotBlank() && entries.isNotEmpty()) {
+        } else if (xposedMatch != null) {
+            entries += ModuleLogEntry(
+                id = entries.size,
+                time = xposedMatch.groupValues[1].trim(),
+                processId = xposedMatch.groupValues[3],
+                threadId = xposedMatch.groupValues[4],
+                level = xposedMatch.groupValues[5],
+                tag = xposedMatch.groupValues[6].trim(),
+                message = xposedMatch.groupValues[7].trim(),
+            )
+        } else if (line.isNotBlank() && entries.isNotEmpty() && line.first().isWhitespace()) {
             val lastIndex = entries.lastIndex
             entries[lastIndex] = entries[lastIndex].copy(
                 message = entries[lastIndex].message + "\n" + line.trimEnd(),
+            )
+        } else if (line.isNotBlank()) {
+            entries += ModuleLogEntry(
+                id = entries.size,
+                time = "--",
+                processId = "-",
+                threadId = "-",
+                level = "I",
+                tag = "LSPosed",
+                message = line.trim(),
             )
         }
     }
@@ -232,6 +279,11 @@ private fun parseModuleLogs(raw: String): List<ModuleLogEntry> {
 private val THREADTIME_LOG_PATTERN = Regex(
     "^(\\d{2}-\\d{2})\\s+(\\d{2}:\\d{2}:\\d{2}\\.\\d{3})\\s+" +
         "(\\d+)\\s+(\\d+)\\s+([VDIWEF])\\s+([^:]+):\\s?(.*)$",
+)
+
+private val XPOSED_LOG_PATTERN = Regex(
+    "^\\[\\s*([^\\]]*?)\\s+(\\d+):\\s*(\\d+):\\s*(\\d+)\\s+" +
+        "([VDIWEF])\\/([^\\]]+)\\]\\s*(.*)$",
 )
 
 @Composable
@@ -268,7 +320,7 @@ internal fun ModuleAboutPage(
                         contentAlignment = Alignment.Center,
                     ) {
                         Image(
-                            painter = painterResource(R.drawable.ic_launcher_foreground),
+                            painter = painterResource(R.drawable.ic_launcher_mark),
                             contentDescription = "Hyper Icon Pack 图标",
                             modifier = Modifier.fillMaxSize(),
                         )

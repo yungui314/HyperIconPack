@@ -11,7 +11,12 @@
       cannot reveal that complete set on Android 11+, so this visibility
       permission is required for the user-requested all-app conversion.
     -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!--
       Public icon-pack discovery contracts used by mainstream launchers.
@@ -93,6 +98,11 @@
             android:name=".systemtheme.PackageThemeArchiveUpdateJobService"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <service
+            android:name=".systemtheme.IconArchiveConversionService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- Classic Xposed module metadata, understood by LSPosed as well. -->
         <meta-data

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" role="img" aria-label="Hyper Icon Pack">
+  <rect width="108" height="108" rx="26" fill="#dce7ff"/>
+  <path d="M27 25h22q8 0 8 8v22q0 8-8 8H27q-8 0-8-8V33q0-8 8-8Z" fill="none" stroke="#264f83" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M59 45h22q8 0 8 8v22q0 8-8 8H59q-8 0-8-8V53q0-8 8-8Z" fill="none" stroke="#264f83" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m54 37 4.2 12.8L71 54l-12.8 4.2L54 71l-4.2-12.8L37 54l12.8-4.2Z" fill="#264f83"/>
+</svg>

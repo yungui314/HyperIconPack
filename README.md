@@ -1,128 +1,127 @@
 # Hyper Icon Pack
 
-面向 Xiaomi HyperOS 的 Root 主题资源转换器。它将 Nova、ADW、Lawnchair 等图标包公开使用的 `appfilter.xml` 转换为 HyperOS 实际读取的私有 `icons` ZIP，再由系统自己的 `IconCustomizer` 提供应用图标。
+<p align="center">
+  <img src="docs/app-icon.svg" width="112" alt="Hyper Icon Pack" />
+</p>
 
-当前版本不再实时解析或加载第三方图标包。普通图标始终只来自一次
-转换后安装的静态主题归档；Xposed 只保留 HyperOS 无法自行覆盖的三个
-显示桥接：
+<p align="center">
+  将标准 Android 图标包转换为 Xiaomi HyperOS 可读取的系统主题图标资源。
+</p>
 
-```text
-com.miui.home
-  启动/返回动画期间的形状桥接
+<p align="center">
+  <a href="https://github.com/yungui314/HyperIconPack/releases"><img alt="Release" src="https://img.shields.io/github/v/release/yungui314/HyperIconPack?include_prereleases&style=flat-square"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/yungui314/HyperIconPack?style=flat-square"></a>
+  <img alt="Android" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white">
+  <img alt="Root" src="https://img.shields.io/badge/Root-required-E95420?style=flat-square">
+  <img alt="LSPosed" src="https://img.shields.io/badge/LSPosed-required-5B6ACD?style=flat-square">
+</p>
 
-com.android.settings / com.miui.securitycenter
-  PackageManager 图标读取桥接
+## 项目简介
 
-com.android.systemui
-  应用通知 smallIcon 的静态主题桥接
-```
-
-因此普通图标只走一条可重启、可检查、可恢复的系统主题资源路径：
-
-```text
-appfilter.xml
-  → Hyper Icon Pack 转换器
-  → /data/system/theme/icons
-  → HyperOS IconCustomizer
-  → 桌面 / 文件夹 / 系统中采用该主题 API 的应用图标
-```
-
-## 全应用转换范围
-
-转换器使用 `QUERY_ALL_PACKAGES` 读取当前用户的完整安装包列表，包含：
-
-- 第三方应用；
-- 系统应用；
-- 禁用应用；
-- 没有 `MAIN/LAUNCHER` 桌面入口的包；
-- Activity-alias 与厂商快捷入口。
-
-每个已安装包都会生成 HyperOS 包级资源：
+Hyper Icon Pack 读取 Nova、ADW、Lawnchair 等通用图标包使用的 `appfilter.xml`，生成 HyperOS 私有 `icons` 主题归档，并通过 Root 安装到系统主题目录。普通图标最终由系统自己的 `IconCustomizer` 读取；Xposed 仅用于补齐桌面动画、设置、手机管家和 SystemUI 等系统接口的显示差异。
 
 ```text
-res/drawable-xxhdpi/<实际包名>.png
+appfilter.xml / 本机应用图标
+        ↓
+Hyper Icon Pack 转换器
+        ↓
+/data/system/theme/icons
+        ↓
+HyperOS 桌面、文件夹、设置与系统界面
 ```
 
-包名大小写会原样保留。例如以下文件名是不同且有效的 HyperOS 查询目标：
+主要能力：
+
+- 转换标准 `appfilter.xml` 图标包，并为已安装应用生成包级资源。
+- 对图标包未覆盖的应用套用其 `iconback`、`iconmask`、`iconupon` 与缩放规则。
+- 可选全局 Monet 转换和自定义 Monet 配色。
+- 转换结果保存为存档，之后切换同一存档无需重新生成。
+- Root 原子安装、完整性校验、自动备份和一键恢复系统原图标。
+- 新安装应用可增量补充进当前主题归档。
+- 支持 HyperOS 动态日历资源；动态时钟仍在研究中。
+
+## 效果展示
+
+<table>
+  <tr>
+    <th>Monet 图标</th>
+    <th>原始配色</th>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/monet-icons.jpg" alt="Monet 图标效果" width="360"></td>
+    <td><img src="docs/screenshots/original-icons.jpg" alt="原始配色图标效果" width="360"></td>
+  </tr>
+</table>
+
+## 已测试环境
+
+目前主要在以下设备上开发和验证：
+
+| 项目 | 测试环境 |
+| --- | --- |
+| 设备 | Xiaomi 14 |
+| 系统 | Xiaomi HyperOS `3.0.303.0` |
+| 系统桌面 | `RELEASE-6.01.05.2407-06081949` |
+| Root / Hook | Root + LSPosed |
+
+> [!WARNING]
+> 本项目最初为个人自用工具，目前没有在更多机型、HyperOS 版本或系统桌面版本上完成系统性测试，因此不保证其他环境可用。建议在操作前准备可恢复方案，并自行承担修改系统主题资源的风险。欢迎提交不同设备的测试反馈，也欢迎有能力的开发者贡献代码。
+
+## 使用方法
+
+1. 安装 APK，在 LSPosed 中启用模块。
+2. 勾选推荐作用域：
+   - 系统桌面 `com.miui.home`
+   - 系统界面 `com.android.systemui`
+   - 设置 `com.android.settings`
+   - 手机管家 `com.miui.securitycenter`
+   - 若设备存在，可额外勾选 `com.xiaomi.misettings`
+3. 打开“设置 > 制作图标包”，选择图标来源、适配比例和 Monet 设置。
+4. 点击“转换并保存”，等待图标存档生成。
+5. 在“图标存档”中选择刚生成的存档并应用。
+6. 按页面提示重启桌面或设备，使系统各进程重新读取主题资源。
+
+转换会覆盖完整 `appfilter.xml` 映射，并为当前系统已安装的第三方应用、系统应用、禁用应用、无桌面入口应用和 Activity Alias 生成必要的包级资源。未适配内容比例建议从 `85%` 开始，再按图标包风格调整。
+
+## 超级岛进度
+
+在支持 Xiaomi HyperOS 3 超级岛的系统上，转换任务会按小米官方焦点通知协议发布进度；不支持或未获得超级岛权限时，会自动退化为标准前台进度通知，转换本身不会中断。
+
+小米对正式上岛有开放平台 App ID、签名、场景审核和焦点通知权限要求。自行编译版本若未完成这些配置，系统可能只显示普通通知。详见[小米超级岛开发指南](https://dev.mi.com/xiaomihyperos/documentation/detail?pId=2131)和[接入流程](https://dev.mi.com/xiaomihyperos/documentation/detail?pId=2132)。
+
+## 实现边界
+
+- 本项目转换的是应用图标，不是包含字体、状态栏信号、电池、Framework 和 MAML 的完整主题商店主题。
+- SystemUI 只能替换有明确应用来源的通知图标；Wi-Fi、信号、电池等系统状态图标无法从 `appfilter.xml` 推导。
+- 动态日历会生成 HyperOS `dynamicicons` 资源；图标包若没有可分离的动态时钟图层，无法可靠生成动态时钟。
+- Monet 转换需要从复杂位图中提取前景层级，渐变、半透明和极细线条图标仍可能与源图存在视觉差异。
+
+## 构建
+
+要求 Android Studio / JDK 17，以及能获取 Android API 37 的 SDK 环境。
+
+```powershell
+.\gradlew.bat :app:assembleDebug
+```
+
+输出位置：
 
 ```text
-com.MobileTicket.png
-com.miHoYo.Yuanshen.png
-com.miHoYo.cloudgames.ys.png
+app/build/outputs/apk/debug/app-debug.apk
 ```
 
-对桌面启动 Activity，转换器还会保留精确 Component 文件名，兼容标准 Launcher 解析：
+## 反馈与贡献
 
-```text
-res/drawable-xxhdpi/com.example.MainActivity.png
-res/drawable-xxhdpi/com.example#other.package.EntryActivity.png
-```
+提交问题时建议附上：
 
-选择每个包的图标时，优先级为：
+- 设备型号、HyperOS 完整版本和系统桌面版本；
+- 图标包名称与版本；
+- 是否开启 Monet、自定义配色及适配比例；
+- 应用内“日志”页面中的应用日志和 Xposed 日志；
+- 能复现问题的截图和操作步骤。
 
-```text
-同包 appfilter 明确映射
-→ 原始应用图标 + iconback / iconmask / iconupon / scale fallback
-→ 跳过无法读取图标资源的异常包
-```
+Issue、测试结果和 Pull Request 都欢迎。请尽量保持修改范围清晰，并说明真机验证环境。
 
-这让没有被图标包专门适配的系统应用也得到与图标包一致的边框和形状。未适配内容比例可选 75%、85%、95%、105%；Pure Icon Pack 建议先从 85% 开始。
+## 许可证
 
-## 操作步骤
-
-1. 在 LSPosed 中启用模块，并确认以下推荐作用域已勾选：
-
-   ```text
-   系统桌面 / com.miui.home
-   系统界面 / com.android.systemui
-   设置 / com.android.settings
-   手机管家 / com.miui.securitycenter
-
-   （若本机存在：com.xiaomi.misettings）
-   ```
-
-2. 打开应用，选择图标包和未适配内容比例。
-
-3. 点击“转换所有已安装应用为主题资源”。界面会显示：
-
-   ```text
-   解析图标包
-   → 转换明确映射
-   → 生成全部应用包级资源
-   → 校验主题归档
-   ```
-
-4. 点击“检查系统主题 Root 访问”，确认显示 `HYPER_ICONPACK_THEME_WRITE_READY`。
-
-5. 点击“应用已转换的全应用系统主题”。安装器会先备份现有 `icons`，再将新 ZIP 原子替换到：
-
-   ```text
-   /data/system/theme/icons
-   ```
-
-6. 完整重启设备。这样能让 SystemUI、系统设置和桌面从干净进程读取新主题资源；若 KernelSU 不允许杀掉 `com.android.systemui`，应用内“重启系统界面”会失败，此时可使用“重启设备”。
-
-## 启动与返回动画
-
-HyperOS 3 的 `FloatingIconView2` 不把普通 `AdaptiveIconDrawable` 当作可用的原生过渡对象；它要求 Xiaomi 的：
-
-```text
-com.miui.home.common.drawable.LayerAdaptiveIconDrawable
-```
-
-模块只在动画开始前，将已显示的圆形主题图标构造成这个 vendor Drawable。桌面、文件夹和图标缓存本身不会被 Hook 修改。若无法可靠检测圆形 alpha 轮廓，桥接会安全退回普通 Outline，不会影响应用启动。
-
-## 系统设置与通知栏的边界
-
-本模块生成的是应用图标主题资源，而不是完整 MIUI 主题包。主题商店的完整主题还可能包含 Framework、Settings、MAML、状态栏信号图标和字体组件；第三方 `appfilter.xml` 不含这些资源。
-
-因此：
-
-- Settings / 手机管家中通过 `PackageManager` 获取的**应用图标**会回退读取本归档；
-- 状态栏仅替换有明确 `StatusBarNotification` 来源的**应用通知图标**，仍由 SystemUI 负责尺寸、深浅色和对比度处理；
-- Wi‑Fi、信号、电池等不是应用图标，不能从 appfilter 推导，也不会被替换；
-- 所有桥接仅解码 `/data/system/theme/icons` 的包级 PNG，不会在 SystemUI、设置或桌面进程重新读取图标包 APK。
-
-## 安全与恢复
-
-Root 安装器只执行内置固定命令，不接受任意 shell 文本。它会记录已安装归档的 SHA-256；恢复前若发现主题商店或其他工具已经更换 `icons`，会拒绝覆盖新的主题。
+本项目采用 [MIT License](LICENSE)。
