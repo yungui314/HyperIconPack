@@ -1,0 +1,22 @@
+# Local Android/Gradle machine configuration and generated outputs
+local.properties
+.gradle/
+build/
+**/build/
+
+# IDE files
+.idea/
+*.iml
+
+# Local reverse-engineering inputs and generated inspection artifacts
+.agents/
+.artifacts/
+.kotlin/
+tools/
+*.apk
+*.zip
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.log

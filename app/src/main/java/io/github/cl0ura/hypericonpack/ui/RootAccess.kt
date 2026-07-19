@@ -1,0 +1,89 @@
+package io.github.cl0ura.hypericonpack.ui
+
+import java.io.BufferedReader
+import java.io.InputStream
+import java.io.InputStreamReader
+import java.util.concurrent.TimeUnit
+
+/**
+ * Small, explicit root-command bridge for user-initiated UI actions only.
+ * Nothing runs automatically at process start, and commands are fixed here
+ * rather than accepting arbitrary shell text from preferences or Intents.
+ */
+internal object RootAccess {
+    private const val COMMAND_TIMEOUT_SECONDS = 12L
+
+    data class Result(
+        val success: Boolean,
+        val output: String,
+    )
+
+    fun check(): Result {
+        val result = runFixed("id")
+        return result.copy(success = result.success && result.output.contains("uid=0"))
+    }
+
+    fun restartLauncher(): Result = runFixed(
+        "am force-stop com.miui.home; " +
+            "cmd activity start-activity -a android.intent.action.MAIN -c android.intent.category.HOME",
+    )
+
+    fun restartSystemUi(): Result = runFixed("pkill -f com.android.systemui")
+
+    /** User-initiated full reboot for surfaces whose caches survive process restarts. */
+    fun rebootSystem(): Result = runFixed("svc power reboot")
+
+    /** Reads only recent records related to this module and its injected processes. */
+    fun readModuleLogs(): Result = runFixed(
+        "logcat -d -v threadtime HyperIconPack:V '*:S' | tail -n 500",
+        timeoutSeconds = 20L,
+    )
+
+    /**
+     * Executes one of the module's fixed, internal Root command templates.
+     * It is intentionally internal: settings and Intent data must never be
+     * promoted to arbitrary shell text.
+     */
+    internal fun runFixed(command: String, timeoutSeconds: Long = COMMAND_TIMEOUT_SECONDS): Result =
+        run(command, input = null, timeoutSeconds = timeoutSeconds)
+
+    /** Streams trusted converter output to a fixed Root command through stdin. */
+    internal fun runFixedWithInput(
+        command: String,
+        input: InputStream,
+        timeoutSeconds: Long,
+    ): Result {
+        return try {
+            input.use { source -> run(command, input = source, timeoutSeconds = timeoutSeconds) }
+        } catch (throwable: Throwable) {
+            Result(false, throwable.javaClass.simpleName + ": " + (throwable.message ?: "无法读取主题归档"))
+        }
+    }
+
+    private fun run(
+        command: String,
+        input: InputStream?,
+        timeoutSeconds: Long,
+    ): Result {
+        return try {
+            val process = ProcessBuilder("su", "-c", command)
+                .redirectErrorStream(true)
+                .start()
+            if (input != null) {
+                process.outputStream.use { destination -> input.copyTo(destination) }
+            } else {
+                process.outputStream.close()
+            }
+            if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                return Result(false, "命令超时；Root 管理器可能没有授予权限。")
+            }
+            val output = BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
+                reader.readText().trim()
+            }
+            Result(process.exitValue() == 0, output)
+        } catch (throwable: Throwable) {
+            Result(false, throwable.javaClass.simpleName + ": " + (throwable.message ?: "无法执行 su"))
+        }
+    }
+}

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Miuix Compose owns the actual light/dark palette; this is only the
+         platform Activity shell and must reference a framework-stable style. -->
+    <style name="Theme.HyperIconPack" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>
