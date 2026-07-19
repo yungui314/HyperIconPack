@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
@@ -346,11 +348,49 @@ internal fun ModuleAboutPage(
                         summary = PROJECT_URL.removePrefix("https://"),
                         onClick = { openUrl(PROJECT_URL) },
                     )
-                    ArrowPreference(
-                        title = "贡献者",
-                        summary = "@$CONTRIBUTOR",
-                        onClick = { openUrl(CONTRIBUTOR_URL) },
-                    )
+                }
+            }
+            item {
+                Text(
+                    text = "贡献者",
+                    style = MiuixTheme.textStyles.headline1,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(start = 6.dp, top = 8.dp, bottom = 2.dp),
+                )
+            }
+            items(CONTRIBUTORS, key = { it.githubUser }) { contributor ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { openUrl(contributor.profileUrl) }
+                            .padding(horizontal = 16.dp, vertical = 13.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Image(
+                            painter = painterResource(contributor.avatarResource),
+                            contentDescription = "${contributor.githubUser} 的 GitHub 头像",
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clip(CircleShape),
+                        )
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            Text(
+                                text = contributor.githubUser,
+                                style = MiuixTheme.textStyles.main,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                text = contributor.description,
+                                style = MiuixTheme.textStyles.body2,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -365,5 +405,19 @@ private fun homeDetailPadding(pagePadding: PaddingValues): PaddingValues = Paddi
 )
 
 private const val PROJECT_URL = "https://github.com/yungui314/HyperIconPack"
-private const val CONTRIBUTOR = "yungui314"
-private const val CONTRIBUTOR_URL = "https://github.com/yungui314"
+
+private data class Contributor(
+    val githubUser: String,
+    val profileUrl: String,
+    val avatarResource: Int,
+    val description: String,
+)
+
+private val CONTRIBUTORS = listOf(
+    Contributor(
+        githubUser = "yungui314",
+        profileUrl = "https://github.com/yungui314",
+        avatarResource = R.drawable.contributor_yungui314,
+        description = "项目发起者与主要贡献者",
+    ),
+)

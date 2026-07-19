@@ -3,6 +3,17 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val releaseStoreFile = providers.environmentVariable("HYPERICONPACK_STORE_FILE").orNull
+val releaseStorePassword = providers.environmentVariable("HYPERICONPACK_STORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("HYPERICONPACK_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("HYPERICONPACK_KEY_PASSWORD").orNull
+val releaseSigningReady = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "io.github.cl0ura.hypericonpack"
     // HyperOS 3 devices used by this module build against Android API 37.
@@ -16,8 +27,8 @@ android {
         applicationId = "io.github.cl0ura.hypericonpack"
         minSdk = 26
         targetSdk = 36
-        versionCode = 41
-        versionName = "0.9.30"
+        versionCode = 42
+        versionName = "0.9.31"
     }
 
     buildFeatures {
@@ -28,6 +39,25 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+
+    if (releaseSigningReady) {
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file(requireNotNull(releaseStoreFile))
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            if (releaseSigningReady) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 }

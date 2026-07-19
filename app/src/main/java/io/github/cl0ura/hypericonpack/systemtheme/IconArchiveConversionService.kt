@@ -221,7 +221,7 @@ class IconArchiveConversionService : Service() {
             is IconArchiveConversionState.Failed -> {
                 title = "图标包制作失败"
                 content = state.message
-                progress = 0
+                progress = lastNotifiedPercent.coerceAtLeast(0)
                 indeterminate = false
                 ongoing = false
             }
@@ -254,68 +254,108 @@ class IconArchiveConversionService : Service() {
         ongoing: Boolean,
     ) {
         val iconKey = "miui.focus.pic_progress"
-        // A stable four-character percentage prevents the compact island from
-        // resizing at 9/10/100%, while the regular notification can still
-        // show exact phase and item counts.
-        val percentText = progress.toString().padStart(3, '0') + "%"
-        val islandStatus = when {
-            ongoing -> "转换中"
-            state is IconArchiveConversionState.Succeeded -> "已完成"
-            else -> "已停止"
+        val percentText = "$progress%"
+        val title = when (state) {
+            is IconArchiveConversionState.Running -> "制作 ${state.request.sourceLabel}"
+            is IconArchiveConversionState.Succeeded -> "图标包制作完成"
+            is IconArchiveConversionState.Failed -> "图标包制作失败"
+            IconArchiveConversionState.Idle -> "制作图标包"
+        }.cleanIslandText(24)
+        val content = when (state) {
+            is IconArchiveConversionState.Running -> state.progress?.let {
+                "${it.phase.notificationLabel()} · ${it.completed}/${it.total}"
+            } ?: "正在准备转换资源"
+            is IconArchiveConversionState.Succeeded -> "已保存 ${state.convertedIcons} 个图标"
+            is IconArchiveConversionState.Failed -> state.message
+            IconArchiveConversionState.Idle -> "正在准备"
+        }.cleanIslandText(48)
+        val highlightColor = when (state) {
+            is IconArchiveConversionState.Succeeded -> ISLAND_SUCCESS_COLOR
+            is IconArchiveConversionState.Failed -> ISLAND_FAILED_COLOR
+            else -> ISLAND_RUNNING_COLOR
         }
         val pictureBundle = Bundle().apply {
-            putParcelable(iconKey, Icon.createWithResource(this@IconArchiveConversionService, R.drawable.ic_notification_small))
+            putParcelable(
+                iconKey,
+                Icon.createWithResource(this@IconArchiveConversionService, R.mipmap.ic_launcher),
+            )
         }
         notification.extras.putBundle("miui.focus.pics", pictureBundle)
 
+        val iconInfo = JSONObject()
+            .put("type", 1)
+            .put("pic", iconKey)
+            .put("picDark", iconKey)
+        val percentTextInfo = JSONObject()
+            .put("title", percentText)
+            .put("narrowFont", true)
+            .put("showHighlightColor", false)
+        val progressInfo = JSONObject()
+            .put("progress", progress)
+            .put("colorProgress", highlightColor)
+            .put("colorProgressEnd", highlightColor)
         val smallIsland = JSONObject()
-            .put("picInfo", JSONObject().put("type", 1).put("pic", iconKey))
-            .put("textInfo", JSONObject().put("title", percentText))
+            .put("picInfo", iconInfo)
+            .put("textInfo", percentTextInfo)
         val bigIsland = JSONObject()
             .put(
                 "imageTextInfoLeft",
                 JSONObject()
                     .put("type", 1)
-                    .put("picInfo", JSONObject().put("type", 1).put("pic", iconKey))
+                    .put("picInfo", iconInfo),
+            )
+            .put(
+                "progressTextInfo",
+                JSONObject()
                     .put(
-                        "textInfo",
+                        "progressInfo",
                         JSONObject()
-                            .put("frontTitle", islandStatus)
-                            .put("title", percentText)
-                            .put("content", "图标包进度")
-                            .put("useHighLight", true),
-                    ),
+                            .put("progress", progress)
+                            .put("colorReach", highlightColor)
+                            .put("colorUnReach", ISLAND_UNREACHED_COLOR),
+                    )
+                    .put("textInfo", percentTextInfo),
             )
         val island = JSONObject()
             .put("islandProperty", 1)
-            // Reordering on every update makes SystemUI replay the compact
-            // island placement animation and looks like its width is jumping.
-            .put("islandOrder", false)
-            .put("islandTimeout", if (ongoing) 21_600 else 30)
-            .put("dismissIsland", !ongoing)
-            .put("highlightColor", "#5B78A6")
+            .put("highlightColor", highlightColor)
             .put("bigIslandArea", bigIsland)
             .put("smallIslandArea", smallIsland)
+            .put("shareData", JSONObject().put("title", title))
         val paramV2 = JSONObject()
             .put("protocol", 1)
             .put("business", "icon_pack_conversion")
             .put("islandFirstFloat", false)
             .put("enableFloat", false)
-            .put("updatable", ongoing)
-            .put("timeout", 360)
+            .put("updatable", true)
+            .put("timeout", if (ongoing) 21_600 else 30)
             .put("filterWhenNoPermission", false)
-            .put("ticker", percentText)
+            .put("ticker", "$percentText $title".cleanIslandText(32))
             .put("tickerPic", iconKey)
+            .put("aodTitle", title)
             .put("param_island", island)
+            .put("progressInfo", progressInfo)
+            .put(
+                "hintInfo",
+                JSONObject()
+                    .put("type", 1)
+                    .put("title", percentText),
+            )
             .put(
                 "baseInfo",
                 JSONObject()
-                    .put("title", "制作图标包")
-                    .put("content", percentText)
-                    .put("colorTitle", "#5B78A6")
-                    .put("type", 2),
+                    .put("title", title)
+                    .put("content", content)
+                    .put("colorTitle", highlightColor)
+                    .put("type", 1),
             )
         notification.extras.putString("miui.focus.param", JSONObject().put("param_v2", paramV2).toString())
+    }
+
+    private fun String.cleanIslandText(maxLength: Int): String {
+        val cleaned = trim().replace(ISLAND_WHITESPACE, " ")
+        if (cleaned.length <= maxLength) return cleaned
+        return cleaned.take((maxLength - 3).coerceAtLeast(1)).trimEnd() + "..."
     }
 
     private fun createNotificationChannel() {
@@ -358,6 +398,11 @@ class IconArchiveConversionService : Service() {
         private const val TAG = "HyperIconPack"
         private const val CHANNEL_ID = "icon_archive_conversion"
         private const val NOTIFICATION_ID = 3917
+        private const val ISLAND_RUNNING_COLOR = "#006EFF"
+        private const val ISLAND_SUCCESS_COLOR = "#1A7F37"
+        private const val ISLAND_FAILED_COLOR = "#D93025"
+        private const val ISLAND_UNREACHED_COLOR = "#1A000000"
+        private val ISLAND_WHITESPACE = Regex("\\s+")
 
         private const val EXTRA_PACKAGE = "package"
         private const val EXTRA_LABEL = "label"

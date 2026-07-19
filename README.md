@@ -44,12 +44,12 @@ HyperOS 桌面、文件夹、设置与系统界面
 
 <table>
   <tr>
-    <th>Monet 图标</th>
-    <th>原始配色</th>
+    <th>Pure Icon Pack · Monet</th>
+    <th>莫奈线条 · Monet</th>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/monet-icons.jpg" alt="Monet 图标效果" width="360"></td>
-    <td><img src="docs/screenshots/original-icons.jpg" alt="原始配色图标效果" width="360"></td>
+    <td><img src="docs/screenshots/pure-icon-pack-monet.jpg" alt="Pure Icon Pack 的 Monet 转换效果" width="360"></td>
+    <td><img src="docs/screenshots/monet-line-icon-pack.jpg" alt="莫奈线条图标包的 Monet 转换效果" width="360"></td>
   </tr>
 </table>
 
@@ -87,6 +87,8 @@ HyperOS 桌面、文件夹、设置与系统界面
 
 在支持 Xiaomi HyperOS 3 超级岛的系统上，转换任务会按小米官方焦点通知协议发布进度；不支持或未获得超级岛权限时，会自动退化为标准前台进度通知，转换本身不会中断。
 
+紧凑态百分比、展开态进度条及完成状态的呈现思路参考了 [ABK](https://github.com/xingguangcuican6666/ABK) 的公开实现。
+
 小米对正式上岛有开放平台 App ID、签名、场景审核和焦点通知权限要求。自行编译版本若未完成这些配置，系统可能只显示普通通知。详见[小米超级岛开发指南](https://dev.mi.com/xiaomihyperos/documentation/detail?pId=2131)和[接入流程](https://dev.mi.com/xiaomihyperos/documentation/detail?pId=2132)。
 
 ## 实现边界
@@ -109,6 +111,17 @@ HyperOS 桌面、文件夹、设置与系统界面
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 ```
+
+正式版签名从环境变量读取，不会把密钥或口令写入仓库：
+
+```text
+HYPERICONPACK_STORE_FILE
+HYPERICONPACK_STORE_PASSWORD
+HYPERICONPACK_KEY_ALIAS
+HYPERICONPACK_KEY_PASSWORD
+```
+
+配置后运行 `.\gradlew.bat :app:assembleRelease` 即可生成签名 APK。
 
 ## 反馈与贡献
 
