@@ -44,8 +44,11 @@ internal class SystemIconShapeDrawable(
             // simple path we own rather than AdaptiveIconDrawable.iconMask:
             // it must be safe to draw for every third-party resource during
             // archive conversion.
-            val radius = minOf(bounds.width(), bounds.height()) * MINIMUM_CORNER_RADIUS_FRACTION
+            val minimum = minOf(bounds.width(), bounds.height()).toFloat()
+            val edgeInset = minimum * EDGE_INSET_FRACTION
             fallbackBounds.set(bounds)
+            fallbackBounds.inset(edgeInset, edgeInset)
+            val radius = minOf(fallbackBounds.width(), fallbackBounds.height()) * MINIMUM_CORNER_RADIUS_FRACTION
             fallbackPath.reset()
             fallbackPath.addRoundRect(fallbackBounds, radius, radius, Path.Direction.CW)
             canvas.clipPath(fallbackPath)
@@ -110,5 +113,6 @@ internal class SystemIconShapeDrawable(
         // square gains visible R corners without being visually transformed
         // into a different icon shape.
         const val MINIMUM_CORNER_RADIUS_FRACTION = 0.18f
+        const val EDGE_INSET_FRACTION = 1f / 256f
     }
 }

@@ -66,7 +66,7 @@ internal object HyperOsIconArchiveConverter {
     private const val TARGET_DENSITY_DIRECTORY = "res/drawable-xxhdpi"
     private const val METADATA_ENTRY = "META-INF/hypericonpack-conversion.properties"
     private const val DEFAULT_RENDERING = "original"
-    private const val GLOBAL_MONET_RENDERING = "global_monet_v16"
+    private const val GLOBAL_MONET_RENDERING = "global_monet_v17"
     private const val GLOBAL_MONET_RENDERING_PREFIX = "global_monet_v"
     private const val ALL_APPLICATIONS_SCOPE = "all"
     private const val SCOPE_FINGERPRINT_LENGTH = 20
@@ -152,6 +152,18 @@ internal object HyperOsIconArchiveConverter {
         packageName == null -> "未选择图标来源"
         isOriginalIconSource(packageName) -> ORIGINAL_ICON_LABEL
         else -> packageName
+    }
+
+    /** Resolves the user-facing icon-pack application name when installed. */
+    fun sourceLabel(context: Context, packageName: String?): String {
+        if (packageName == null || isOriginalIconSource(packageName)) return sourceLabel(packageName)
+        return runCatching {
+            val info = context.packageManager.getApplicationInfo(
+                packageName,
+                PackageManager.MATCH_DISABLED_COMPONENTS,
+            )
+            context.packageManager.getApplicationLabel(info).toString().ifBlank { packageName }
+        }.getOrDefault(packageName)
     }
 
     /**

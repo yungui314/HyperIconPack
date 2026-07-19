@@ -78,6 +78,29 @@ internal object RootAccess {
             val process = ProcessBuilder("su", "-c", command)
                 .redirectErrorStream(true)
                 .start()
+            // Root and LSPosed can easily produce more than the process pipe's
+            // ~64 KiB buffer. Drain stdout while the command is running;
+            // waiting first makes both sides block and falsely reports a
+            // timeout even though the shell command already produced data.
+            val output = StringBuilder()
+            var readFailure: Throwable? = null
+            val readerThread = Thread({
+                try {
+                    BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
+                        val buffer = CharArray(8 * 1024)
+                        while (true) {
+                            val count = reader.read(buffer)
+                            if (count < 0) break
+                            output.append(buffer, 0, count)
+                        }
+                    }
+                } catch (throwable: Throwable) {
+                    readFailure = throwable
+                }
+            }, "HyperIconPack-root-output").apply {
+                isDaemon = true
+                start()
+            }
             if (input != null) {
                 process.outputStream.use { destination -> input.copyTo(destination) }
             } else {
@@ -85,12 +108,15 @@ internal object RootAccess {
             }
             if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                 process.destroyForcibly()
+                readerThread.join(1_000L)
                 return Result(false, "命令超时；Root 管理器可能没有授予权限。")
             }
-            val output = BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
-                reader.readText().trim()
+            readerThread.join(2_000L)
+            if (readerThread.isAlive) {
+                return Result(false, "命令已结束，但读取输出超时。")
             }
-            Result(process.exitValue() == 0, output)
+            readFailure?.let { throw it }
+            Result(process.exitValue() == 0, output.toString().trim())
         } catch (throwable: Throwable) {
             Result(false, throwable.javaClass.simpleName + ": " + (throwable.message ?: "无法执行 su"))
         }

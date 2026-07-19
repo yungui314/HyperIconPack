@@ -19,8 +19,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * App icons themselves are resolved entirely by HyperOS from the generated
  * /data/system/theme/icons archive.  This class never loads an icon pack or
  * replaces a desktop/folder Drawable; it only supplies the displayed themed
- * Drawable to the vendor launch/return transition and publishes an adaptive
- * outline when that PNG is visibly round.
+ * Drawable to the vendor launch/return transition and publishes an alpha-
+ * derived outline for every static PNG shape.
  */
 internal object ThemeAnimationRuntime {
     private const val TAG = "HyperIconPack"
@@ -60,7 +60,7 @@ internal object ThemeAnimationRuntime {
     fun preferAnimationTargetDrawable(targetDrawable: Drawable?): Drawable? {
         if (!shouldBridgeAnimation() || targetDrawable == null) return null
         if (bridgeLogged.compareAndSet(false, true)) {
-            log("Theme animation bridge is using the displayed HyperOS icon with an adaptive round path when possible")
+            log("Theme animation bridge is using the displayed HyperOS icon with a shape-aware alpha outline")
         }
         return when (targetDrawable) {
             is AdaptiveIconDrawable,

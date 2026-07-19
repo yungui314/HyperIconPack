@@ -106,6 +106,12 @@ fun SettingsNavigationScreen(
     var archives by remember { mutableStateOf(emptyList<HyperOsIconArchiveConverter.ExistingArchiveInfo>()) }
     var scanning by remember { mutableStateOf(false) }
     var scanSummary by remember { mutableStateOf("尚未扫描") }
+    val sourceLabels = remember(iconPacks) {
+        buildMap {
+            put(HyperOsIconArchiveConverter.ORIGINAL_ICON_PACKAGE, HyperOsIconArchiveConverter.ORIGINAL_ICON_LABEL)
+            iconPacks.forEach { put(it.packageName, it.label) }
+        }
+    }
 
     fun refreshInventory() {
         if (scanning) return
@@ -153,6 +159,7 @@ fun SettingsNavigationScreen(
         SettingsDestination.ARCHIVES -> ConvertedArchivesPage(
             rootPadding = rootPadding,
             archives = archives,
+            sourceLabels = sourceLabels,
             onBack = { destination = SettingsDestination.OVERVIEW },
             onArchivesChanged = ::refreshInventory,
         )
@@ -458,6 +465,7 @@ private fun IconArchiveCreatorPage(
 private fun ConvertedArchivesPage(
     rootPadding: PaddingValues,
     archives: List<HyperOsIconArchiveConverter.ExistingArchiveInfo>,
+    sourceLabels: Map<String, String>,
     onBack: () -> Unit,
     onArchivesChanged: () -> Unit,
 ) {
@@ -496,7 +504,7 @@ private fun ConvertedArchivesPage(
                 if (settingsStore.pendingThemeArchivePackageUpdates().isNotEmpty()) {
                     PackageThemeArchiveUpdateScheduler.schedule(context)
                 }
-                "已应用 ${HyperOsIconArchiveConverter.sourceLabel(sourcePackage)}"
+                "已应用 ${sourceLabels[sourcePackage] ?: HyperOsIconArchiveConverter.sourceLabel(sourcePackage)}"
             } else {
                 "应用失败：${result.output.ifBlank { "请检查 Root 授权" }}"
             }
@@ -546,6 +554,8 @@ private fun ConvertedArchivesPage(
                 items(archives, key = { it.archive.absolutePath }) { archive ->
                     ConvertedArchiveCard(
                         archive = archive,
+                        sourceLabel = archive.iconPackPackage?.let(sourceLabels::get)
+                            ?: HyperOsIconArchiveConverter.sourceLabel(archive.iconPackPackage),
                         busy = activeActionPath == archive.archive.absolutePath,
                         onApply = { applyArchive(archive) },
                         onDelete = { deletingArchive = archive },
@@ -559,7 +569,8 @@ private fun ConvertedArchivesPage(
         ConfirmDialog(
             show = true,
             title = "删除转换存档？",
-            summary = HyperOsIconArchiveConverter.sourceLabel(archive.iconPackPackage),
+            summary = archive.iconPackPackage?.let(sourceLabels::get)
+                ?: HyperOsIconArchiveConverter.sourceLabel(archive.iconPackPackage),
             confirmText = "删除",
             onDismiss = { deletingArchive = null },
             onConfirm = {
@@ -573,11 +584,12 @@ private fun ConvertedArchivesPage(
 @Composable
 private fun ConvertedArchiveCard(
     archive: HyperOsIconArchiveConverter.ExistingArchiveInfo,
+    sourceLabel: String,
     busy: Boolean,
     onApply: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val source = HyperOsIconArchiveConverter.sourceLabel(archive.iconPackPackage)
+    val source = sourceLabel
     val size = "${archive.archive.length() / 1024 / 1024} MB"
     val created = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
         .format(Date(archive.archive.lastModified()))

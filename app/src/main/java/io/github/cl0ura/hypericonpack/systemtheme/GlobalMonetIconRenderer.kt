@@ -105,7 +105,7 @@ internal object GlobalMonetIconRenderer {
         palette: GlobalMonetPalette,
         size: Int,
         output: OutputStream,
-    ) = renderClustered(drawable, palette, size, output, maxClusters = 6, preserveEdges = true)
+    ) = renderClustered(drawable, palette, size, output, maxClusters = 6)
 
     /**
      * Renders Android 13+'s semantic monochrome foreground over a real
@@ -184,7 +184,7 @@ internal object GlobalMonetIconRenderer {
         palette: GlobalMonetPalette,
         size: Int,
         output: OutputStream,
-    ) = renderClustered(drawable, palette, size, output, maxClusters = 4, preserveEdges = true)
+    ) = renderClustered(drawable, palette, size, output, maxClusters = 4)
 
     /**
      * Guaranteed low-complexity Monet fallback. It intentionally avoids edge
@@ -199,7 +199,7 @@ internal object GlobalMonetIconRenderer {
         palette: GlobalMonetPalette,
         size: Int,
         output: OutputStream,
-    ) = renderClustered(drawable, palette, size, output, maxClusters = 3, preserveEdges = false)
+    ) = renderClustered(drawable, palette, size, output, maxClusters = 3)
 
     /**
      * Region-aware Monet rendering. A small weighted colour model preserves
@@ -214,7 +214,6 @@ internal object GlobalMonetIconRenderer {
         size: Int,
         output: OutputStream,
         maxClusters: Int,
-        preserveEdges: Boolean,
     ) {
         require(size > 0) { "图标渲染尺寸必须大于零" }
         val source = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
@@ -223,6 +222,7 @@ internal object GlobalMonetIconRenderer {
             drawDrawable(drawable, source, size)
             val sourcePixels = IntArray(size * size)
             source.getPixels(sourcePixels, 0, size, 0, 0, size, size)
+            repairOuterBoundaryColours(sourcePixels, size)
             val model = buildClusterModel(sourcePixels, size, palette, maxClusters)
             val pixelClusters = IntArray(sourcePixels.size) { index ->
                 if (Color.alpha(sourcePixels[index]) == 0) -1 else model.clusterFor(sourcePixels[index])
@@ -232,19 +232,7 @@ internal object GlobalMonetIconRenderer {
                 val alpha = Color.alpha(pixel)
                 if (alpha == 0) return@forEachIndexed
                 val cluster = pixelClusters[index]
-                var tone = model.tones[cluster]
-                if (preserveEdges && cluster != model.backgroundCluster) {
-                    val strengthen = boundaryStrengthening(
-                        pixels = sourcePixels,
-                        pixelClusters = pixelClusters,
-                        index = index,
-                        size = size,
-                        model = model,
-                        cluster = cluster,
-                        foreground = palette.darkTone,
-                    )
-                    if (strengthen > 0) tone = blend(tone, palette.darkTone, strengthen)
-                }
+                val tone = model.tones[cluster]
                 targetPixels[index] = Color.argb(
                     alpha,
                     Color.red(tone),
@@ -389,20 +377,36 @@ internal object GlobalMonetIconRenderer {
         val orderedForeground = centroids.indices
             .filter { it != backgroundCluster }
             .sortedWith(compareBy<Int>({ luminance(centroids[it]) }, { colourOrder(centroids[it]) }))
-        orderedForeground.forEachIndexed { position, cluster ->
-            val amount = if (orderedForeground.size <= 1) {
-                0
-            } else {
-                val maxAmount = if (backgroundCluster >= 0) {
-                    CLUSTER_FOREGROUND_MAX_AMOUNT
-                } else {
-                    CLUSTER_FULL_MAX_AMOUNT
-                }
-                position * maxAmount / (orderedForeground.size - 1)
+        if (backgroundCluster >= 0) {
+            // Flat icons commonly contain several fully opaque colours only
+            // because their antialiased glyph was precomposited onto an opaque
+            // background. Ranking those blends by luminance created a dark
+            // one-pixel outline around an otherwise lighter glyph. Map every
+            // region monotonically by its actual distance from the detected
+            // background instead: background -> container, farthest subject
+            // -> dark tone, intermediate samples -> smooth antialiasing.
+            val background = centroids[backgroundCluster]
+            val maxDistance = orderedForeground.maxOfOrNull { colourDistance(centroids[it], background) }
+                ?.coerceAtLeast(1)
+                ?: 1
+            orderedForeground.forEach { cluster ->
+                val distance = colourDistance(centroids[cluster], background)
+                val amount = (kotlin.math.sqrt(distance.toDouble() / maxDistance) * OPAQUE)
+                    .roundToInt()
+                    .coerceIn(0, OPAQUE)
+                tones[cluster] = blend(palette.outerContainer, palette.darkTone, amount)
             }
-            tones[cluster] = blend(palette.darkTone, palette.outerContainer, amount)
+            tones[backgroundCluster] = palette.outerContainer
+        } else {
+            orderedForeground.forEachIndexed { position, cluster ->
+                val amount = if (orderedForeground.size <= 1) {
+                    0
+                } else {
+                    position * CLUSTER_FULL_MAX_AMOUNT / (orderedForeground.size - 1)
+                }
+                tones[cluster] = blend(palette.darkTone, palette.outerContainer, amount)
+            }
         }
-        if (backgroundCluster >= 0) tones[backgroundCluster] = palette.outerContainer
 
         return ClusterModel(
             bucketToCluster = bucketToCluster,
@@ -471,54 +475,34 @@ internal object GlobalMonetIconRenderer {
     }
 
     /**
-     * Strengthens only the foreground side of a weak mapped boundary. The
-     * previous per-pixel edge darkening affected both sides of every source
-     * colour transition, which looked soft and outlined after launcher
-     * downscaling. Strong boundaries are already represented by separate
-     * cluster tones and need no extra processing.
+     * Bitmap and adaptive layers sampled exactly at 0/size can acquire a
+     * one-pixel premultiplied fringe on all four sides. Inherit the colour of
+     * the first interior pixel while preserving the edge alpha. This is the
+     * standard texture-extrusion treatment and does not change icon shape.
      */
-    private fun boundaryStrengthening(
-        pixels: IntArray,
-        pixelClusters: IntArray,
-        index: Int,
-        size: Int,
-        model: ClusterModel,
-        cluster: Int,
-        foreground: Int,
-    ): Int {
-        val pixel = pixels[index]
-        val tone = model.tones[cluster]
-        val toneDistanceFromForeground = colourDistance(tone, foreground)
-        val x = index % size
-        val y = index / size
-        var strongestSourceBoundary = 0
+    private fun repairOuterBoundaryColours(pixels: IntArray, size: Int) {
+        if (size < 3) return
 
-        fun inspect(otherIndex: Int) {
-            val other = pixels[otherIndex]
-            if (Color.alpha(other) < MIN_VISIBLE_ALPHA) return
-            val otherCluster = pixelClusters[otherIndex]
-            if (otherCluster < 0) return
-            if (otherCluster == cluster) return
-
-            val otherTone = model.tones[otherCluster]
-            if (colourDistance(tone, otherTone) >= TARGET_EDGE_CONTRAST_SQUARED) return
-            // Enhance the side that is already nearer the foreground end of
-            // the palette. This increases separation in both light and dark
-            // system themes without assuming that foreground means "darker".
-            if (toneDistanceFromForeground > colourDistance(otherTone, foreground)) return
-            strongestSourceBoundary = maxOf(strongestSourceBoundary, colourDistance(pixel, other))
+        fun inherit(edgeIndex: Int, interiorIndex: Int) {
+            val edge = pixels[edgeIndex]
+            val alpha = Color.alpha(edge)
+            if (alpha == 0) return
+            val interior = pixels[interiorIndex]
+            if (Color.alpha(interior) == 0) return
+            pixels[edgeIndex] = Color.argb(
+                alpha,
+                Color.red(interior),
+                Color.green(interior),
+                Color.blue(interior),
+            )
         }
 
-        if (x > 0) inspect(index - 1)
-        if (x + 1 < size) inspect(index + 1)
-        if (y > 0) inspect(index - size)
-        if (y + 1 < size) inspect(index + size)
-        if (strongestSourceBoundary <= CLUSTER_EDGE_START_SQUARED) return 0
-        return ((strongestSourceBoundary - CLUSTER_EDGE_START_SQUARED).toLong() *
-            CLUSTER_EDGE_MAX_STRENGTHEN /
-            (CLUSTER_EDGE_FULL_SQUARED - CLUSTER_EDGE_START_SQUARED))
-            .toInt()
-            .coerceIn(0, CLUSTER_EDGE_MAX_STRENGTHEN)
+        for (position in 0 until size) {
+            inherit(position, size + position)
+            inherit((size - 1) * size + position, (size - 2) * size + position)
+            inherit(position * size, position * size + 1)
+            inherit(position * size + size - 1, position * size + size - 2)
+        }
     }
 
     private fun renderBitmap(
@@ -871,10 +855,5 @@ internal object GlobalMonetIconRenderer {
     // Keep every subject region decisively separated from the container. The
     // old 165/220 limits allowed the lightest clusters to approach the
     // background and made small launcher icons look washed out.
-    private const val CLUSTER_FOREGROUND_MAX_AMOUNT = 108
     private const val CLUSTER_FULL_MAX_AMOUNT = 148
-    private const val TARGET_EDGE_CONTRAST_SQUARED = 30 * 30
-    private const val CLUSTER_EDGE_START_SQUARED = 28 * 28
-    private const val CLUSTER_EDGE_FULL_SQUARED = 104 * 104
-    private const val CLUSTER_EDGE_MAX_STRENGTHEN = 34
 }

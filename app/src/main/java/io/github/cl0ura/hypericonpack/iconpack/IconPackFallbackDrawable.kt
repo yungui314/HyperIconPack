@@ -34,6 +34,7 @@ internal class IconPackFallbackDrawable(
 ) : Drawable(), Drawable.Callback {
     private val sourceScale = scale.coerceIn(MIN_SCALE, MAX_SCALE)
     private val sourceBounds = RectF()
+    private val contentBounds = Rect()
     private val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
     }
@@ -61,14 +62,15 @@ internal class IconPackFallbackDrawable(
             bounds.bottom.toFloat(),
             null,
         )
+        val drawingBounds = insetContentBounds(bounds)
         background?.let { drawable ->
-            drawable.bounds = bounds
+            drawable.bounds = drawingBounds
             drawable.draw(canvas)
         }
-        source.bounds = scaledBounds(bounds)
+        source.bounds = scaledBounds(drawingBounds)
         source.draw(canvas)
         foreground?.let { drawable ->
-            drawable.bounds = bounds
+            drawable.bounds = drawingBounds
             drawable.draw(canvas)
         }
         // Static HyperOS theme PNGs bypass a launcher's final icon clip. Apply
@@ -190,7 +192,8 @@ internal class IconPackFallbackDrawable(
         val maskCanvas = Canvas(bitmap)
         maskCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
         val shapeLayer = mask ?: background ?: return null
-        shapeLayer.bounds = Rect(0, 0, width, height)
+        val inset = edgeInset(width, height)
+        shapeLayer.bounds = Rect(inset, inset, width - inset, height - inset)
         shapeLayer.draw(maskCanvas)
         // iconback alpha describes visible content directly; only standard
         // iconmask resources can use the inverse-alpha convention.
@@ -203,6 +206,22 @@ internal class IconPackFallbackDrawable(
         cachedMask = bitmap
         maskDirty = false
         return bitmap
+    }
+
+    private fun insetContentBounds(bounds: Rect): Rect {
+        val inset = edgeInset(bounds.width(), bounds.height())
+        contentBounds.set(bounds)
+        if (inset > 0) contentBounds.inset(inset, inset)
+        return contentBounds
+    }
+
+    private fun edgeInset(width: Int, height: Int): Int {
+        val minimum = minOf(width, height)
+        if (minimum < 8) return 0
+        // A one-pixel transparent safety edge at the 256 px archive size
+        // prevents BitmapDrawable filtering from sampling outside the layer
+        // and creating dark lines at x/y = 0/max.
+        return maxOf(1, (minimum * EDGE_INSET_FRACTION).roundToInt())
     }
 
     private fun scaledBounds(bounds: Rect): Rect {
@@ -294,6 +313,7 @@ internal class IconPackFallbackDrawable(
 
     private companion object {
         const val OPAQUE = 255
+        const val EDGE_INSET_FRACTION = 1f / 256f
         const val MIN_SCALE = 0.5f
         const val MAX_SCALE = 2f
         const val MASK_DIRECTION_THRESHOLD = 32.0

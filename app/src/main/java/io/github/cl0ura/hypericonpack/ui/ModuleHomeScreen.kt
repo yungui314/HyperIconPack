@@ -101,7 +101,11 @@ private fun ModuleHomeOverview(
             )
             val root = RootAccess.check()
             val theme = if (root.success) RootThemeIconInstaller.status() else null
-            ModuleStatusSnapshot(config, archive, root, theme)
+            val sourceName = HyperOsIconArchiveConverter.sourceLabel(
+                context,
+                archive?.iconPackPackage ?: config.packageName,
+            )
+            ModuleStatusSnapshot(config, archive, root, theme, sourceName)
         }
     }
 
@@ -246,6 +250,7 @@ private data class ModuleStatusSnapshot(
     val archive: HyperOsIconArchiveConverter.ExistingArchiveInfo?,
     val root: RootAccess.Result,
     val theme: RootThemeIconInstaller.Result?,
+    val sourceName: String,
 ) {
     val rootReady: Boolean get() = root.success
     val archiveReady: Boolean get() = archive != null
@@ -256,7 +261,7 @@ private data class ModuleStatusSnapshot(
     val sourceLabel: String
         get() = archive?.let {
             buildString {
-                append(HyperOsIconArchiveConverter.sourceLabel(it.iconPackPackage))
+                append(sourceName)
                 if (it.globalMonetIcons) append(" · Monet")
             }
         } ?: "尚未生成"
@@ -291,6 +296,7 @@ private data class ModuleStatusSnapshot(
             archive = null,
             root = RootAccess.Result(false, "正在检查"),
             theme = null,
+            sourceName = "正在读取",
         )
     }
 }

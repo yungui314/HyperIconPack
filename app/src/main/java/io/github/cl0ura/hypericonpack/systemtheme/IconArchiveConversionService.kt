@@ -86,6 +86,8 @@ class IconArchiveConversionService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var conversionJob: Job? = null
     private var conversionFinished = false
+    private var lastNotifiedPercent = -1
+    private var lastNotifiedPhase: HyperOsIconArchiveConverter.ConversionPhase? = null
     private lateinit var notificationManager: NotificationManager
 
     override fun onCreate() {
@@ -121,7 +123,12 @@ class IconArchiveConversionService : Service() {
                     onProgress = { progress ->
                         val state = IconArchiveConversionState.Running(request, progress)
                         IconArchiveConversionController.publish(state)
-                        notificationManager.notify(NOTIFICATION_ID, buildNotification(state))
+                        val percent = (progress.fraction * 100).toInt().coerceIn(0, 100)
+                        if (percent != lastNotifiedPercent || progress.phase != lastNotifiedPhase) {
+                            lastNotifiedPercent = percent
+                            lastNotifiedPhase = progress.phase
+                            notificationManager.notify(NOTIFICATION_ID, buildNotification(state))
+                        }
                     },
                 )
             }
@@ -236,19 +243,26 @@ class IconArchiveConversionService : Service() {
         }
 
         val notification = builder.build()
-        attachXiaomiIslandPayload(notification, state, title, content, progress, ongoing)
+        attachXiaomiIslandPayload(notification, state, progress, ongoing)
         return notification
     }
 
     private fun attachXiaomiIslandPayload(
         notification: Notification,
         state: IconArchiveConversionState,
-        title: String,
-        content: String,
         progress: Int,
         ongoing: Boolean,
     ) {
         val iconKey = "miui.focus.pic_progress"
+        // A stable four-character percentage prevents the compact island from
+        // resizing at 9/10/100%, while the regular notification can still
+        // show exact phase and item counts.
+        val percentText = progress.toString().padStart(3, '0') + "%"
+        val islandStatus = when {
+            ongoing -> "转换中"
+            state is IconArchiveConversionState.Succeeded -> "已完成"
+            else -> "已停止"
+        }
         val pictureBundle = Bundle().apply {
             putParcelable(iconKey, Icon.createWithResource(this@IconArchiveConversionService, R.drawable.ic_notification_small))
         }
@@ -256,7 +270,7 @@ class IconArchiveConversionService : Service() {
 
         val smallIsland = JSONObject()
             .put("picInfo", JSONObject().put("type", 1).put("pic", iconKey))
-            .put("textInfo", JSONObject().put("title", "$progress%"))
+            .put("textInfo", JSONObject().put("title", percentText))
         val bigIsland = JSONObject()
             .put(
                 "imageTextInfoLeft",
@@ -266,15 +280,17 @@ class IconArchiveConversionService : Service() {
                     .put(
                         "textInfo",
                         JSONObject()
-                            .put("frontTitle", if (ongoing) "转换中" else "已结束")
-                            .put("title", "$progress%")
-                            .put("content", content)
+                            .put("frontTitle", islandStatus)
+                            .put("title", percentText)
+                            .put("content", "图标包进度")
                             .put("useHighLight", true),
                     ),
             )
         val island = JSONObject()
             .put("islandProperty", 1)
-            .put("islandOrder", state is IconArchiveConversionState.Running)
+            // Reordering on every update makes SystemUI replay the compact
+            // island placement animation and looks like its width is jumping.
+            .put("islandOrder", false)
             .put("islandTimeout", if (ongoing) 21_600 else 30)
             .put("dismissIsland", !ongoing)
             .put("highlightColor", "#5B78A6")
@@ -288,14 +304,14 @@ class IconArchiveConversionService : Service() {
             .put("updatable", ongoing)
             .put("timeout", 360)
             .put("filterWhenNoPermission", false)
-            .put("ticker", "$progress%")
+            .put("ticker", percentText)
             .put("tickerPic", iconKey)
             .put("param_island", island)
             .put(
                 "baseInfo",
                 JSONObject()
-                    .put("title", title)
-                    .put("content", content)
+                    .put("title", "制作图标包")
+                    .put("content", percentText)
                     .put("colorTitle", "#5B78A6")
                     .put("type", 2),
             )
