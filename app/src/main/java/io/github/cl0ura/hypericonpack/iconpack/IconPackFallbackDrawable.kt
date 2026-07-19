@@ -192,8 +192,13 @@ internal class IconPackFallbackDrawable(
         val maskCanvas = Canvas(bitmap)
         maskCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
         val shapeLayer = mask ?: background ?: return null
-        val inset = edgeInset(width, height)
-        shapeLayer.bounds = Rect(inset, inset, width - inset, height - inset)
+        // Never inset iconmask itself. Packs such as Pure use the standard
+        // inverse convention (opaque outside the circle, transparent inside).
+        // Making its outermost pixels transparent changes the convention
+        // detector to DST_IN and produces a square tile with a circular hole.
+        // Only visible artwork layers are inset in draw(); mask semantics must
+        // always be sampled across their original full viewport.
+        shapeLayer.bounds = Rect(0, 0, width, height)
         shapeLayer.draw(maskCanvas)
         // iconback alpha describes visible content directly; only standard
         // iconmask resources can use the inverse-alpha convention.
@@ -249,13 +254,35 @@ internal class IconPackFallbackDrawable(
      * hard-coding it so conventional non-inverted circle masks still work.
      */
     private fun isInverseMask(bitmap: Bitmap): Boolean {
-        val centreAlpha = bitmap.getPixel(bitmap.width / 2, bitmap.height / 2) ushr 24
-        val edgeAlpha = listOf(
-            bitmap.getPixel(0, 0) ushr 24,
-            bitmap.getPixel(bitmap.width - 1, 0) ushr 24,
-            bitmap.getPixel(0, bitmap.height - 1) ushr 24,
-            bitmap.getPixel(bitmap.width - 1, bitmap.height - 1) ushr 24,
-        ).average()
+        val minimum = minOf(bitmap.width, bitmap.height)
+        val step = maxOf(1, minimum / 32)
+        val band = maxOf(1, minimum / 16)
+        var edgeTotal = 0L
+        var edgeCount = 0
+        val depths = listOf(0, band / 2, band - 1).distinct()
+        depths.forEach { depth ->
+            for (x in 0 until bitmap.width step step) {
+                edgeTotal += bitmap.getPixel(x, depth) ushr 24
+                edgeTotal += bitmap.getPixel(x, bitmap.height - 1 - depth) ushr 24
+                edgeCount += 2
+            }
+            for (y in 0 until bitmap.height step step) {
+                edgeTotal += bitmap.getPixel(depth, y) ushr 24
+                edgeTotal += bitmap.getPixel(bitmap.width - 1 - depth, y) ushr 24
+                edgeCount += 2
+            }
+        }
+
+        var centreTotal = 0L
+        var centreCount = 0
+        for (y in bitmap.height / 3..bitmap.height * 2 / 3 step step) {
+            for (x in bitmap.width / 3..bitmap.width * 2 / 3 step step) {
+                centreTotal += bitmap.getPixel(x, y) ushr 24
+                centreCount++
+            }
+        }
+        val edgeAlpha = edgeTotal.toDouble() / edgeCount.coerceAtLeast(1)
+        val centreAlpha = centreTotal.toDouble() / centreCount.coerceAtLeast(1)
         return edgeAlpha - centreAlpha > MASK_DIRECTION_THRESHOLD
     }
 

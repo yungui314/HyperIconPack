@@ -66,7 +66,7 @@ internal object HyperOsIconArchiveConverter {
     private const val TARGET_DENSITY_DIRECTORY = "res/drawable-xxhdpi"
     private const val METADATA_ENTRY = "META-INF/hypericonpack-conversion.properties"
     private const val DEFAULT_RENDERING = "original"
-    private const val GLOBAL_MONET_RENDERING = "global_monet_v17"
+    private const val GLOBAL_MONET_RENDERING = "global_monet_v18"
     private const val GLOBAL_MONET_RENDERING_PREFIX = "global_monet_v"
     private const val ALL_APPLICATIONS_SCOPE = "all"
     private const val SCOPE_FINGERPRINT_LENGTH = 20
