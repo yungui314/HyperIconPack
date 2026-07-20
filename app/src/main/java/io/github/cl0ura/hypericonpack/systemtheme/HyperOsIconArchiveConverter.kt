@@ -1062,6 +1062,24 @@ internal object HyperOsIconArchiveConverter {
     }
 
     /**
+     * Finds the newest valid archive for a source, regardless of the installed
+     * application fingerprint embedded in its filename.  The fingerprint is
+     * intentionally part of the conversion cache key, so installing or
+     * removing an app can make the exact-key lookup miss even while the
+     * previously applied archive is still the active system theme.
+     */
+    fun latestCachedArchiveForSource(
+        context: Context,
+        iconPackPackage: String?,
+    ): ExistingArchiveInfo? {
+        if (iconPackPackage.isNullOrBlank()) return null
+        return cachedArchiveInfos(context)
+            .asSequence()
+            .filter { it.iconPackPackage == iconPackPackage }
+            .maxByOrNull { it.archive.lastModified() }
+    }
+
+    /**
      * Removes only a converter-owned cache file. The active HyperOS archive
      * under /data/system/theme is intentionally untouched: deleting a cache
      * must never silently change the icon theme currently visible to the user.

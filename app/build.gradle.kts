@@ -27,8 +27,8 @@ android {
         applicationId = "io.github.cl0ura.hypericonpack"
         minSdk = 26
         targetSdk = 36
-        versionCode = 44
-        versionName = "0.9.33"
+        versionCode = 45
+        versionName = "0.9.34"
     }
 
     buildFeatures {

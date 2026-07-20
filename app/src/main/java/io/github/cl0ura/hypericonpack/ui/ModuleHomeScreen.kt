@@ -91,6 +91,10 @@ private fun ModuleHomeOverview(
         snapshot = withContext(Dispatchers.IO) {
             val config = settingsStore.read()
             val archive = HyperOsIconArchiveConverter.archiveInfo(settingsStore.readActiveArchive())
+                ?: HyperOsIconArchiveConverter.latestCachedArchiveForSource(
+                    context = context,
+                    iconPackPackage = config.packageName,
+                )
                 ?: HyperOsIconArchiveConverter.existingArchiveInfo(
                     context = context,
                     iconPackPackage = config.packageName,
@@ -254,7 +258,7 @@ private data class ModuleStatusSnapshot(
     val sourceName: String,
 ) {
     val rootReady: Boolean get() = root.success
-    val archiveReady: Boolean get() = archive != null
+    val archiveReady: Boolean get() = sourceConfigured
     val themeActive: Boolean get() = theme?.success == true
 
     val rootLabel: String get() = if (rootReady) "已授权" else "未授权"
@@ -265,7 +269,16 @@ private data class ModuleStatusSnapshot(
                 append(sourceName)
                 if (it.globalMonetIcons) append(" · Monet")
             }
+        } ?: config.packageName?.takeIf { config.systemThemeActive }?.let {
+            buildString {
+                append(sourceName)
+                if (config.globalMonetIcons) append(" · Monet")
+            }
         } ?: "尚未生成"
+
+    /** An applied source remains meaningful even when its cache key changed. */
+    val sourceConfigured: Boolean
+        get() = archive != null || (config.systemThemeActive && config.packageName != null)
 
     val themeLabel: String
         get() = when {
