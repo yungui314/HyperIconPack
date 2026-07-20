@@ -18,7 +18,7 @@
 
 ## 项目简介
 
-Hyper Icon Pack 读取 Nova、ADW、Lawnchair 等通用图标包使用的 `appfilter.xml`，生成 HyperOS 私有 `icons` 主题归档，并通过 Root 安装到系统主题目录。普通图标最终由系统自己的 `IconCustomizer` 读取；Xposed 仅用于补齐桌面动画、设置、手机管家和 SystemUI 等系统接口的显示差异。
+Hyper Icon Pack 读取 Nova、ADW、Lawnchair 等通用图标包使用的 `appfilter.xml`，生成 HyperOS 私有 `icons` 主题归档，并通过 Root 安装到系统主题目录。所有应用图标最终都由系统自己的 `IconCustomizer` 读取；Xposed API 102 仅用于适配小米桌面的启动与返回动画，不参与实时图标替换。
 
 ```text
 appfilter.xml / 本机应用图标
@@ -71,14 +71,8 @@ HyperOS 桌面、文件夹、设置与系统界面
 
 ## 使用方法
 
-1. 安装 APK，在 LSPosed 中启用模块。
-2. 勾选推荐作用域：
-   - 系统桌面 `com.miui.home`
-   - 系统界面 `com.android.systemui`
-   - 设置 `com.android.settings`
-   - 手机管家 `com.miui.securitycenter`
-   - 小组件中心 `com.miui.personalassistant`
-   - 若设备存在，可额外勾选 `com.xiaomi.misettings`
+1. 安装 APK，在支持 libxposed API 102 的框架中启用模块。
+2. 作用域只保留系统桌面 `com.miui.home`。设置、SystemUI、手机管家和小组件中心均通过 HyperOS 系统主题资源读取图标，不需要注入。
 3. 打开“设置 > 制作图标包”，选择图标来源、适配比例和 Monet 设置。
 4. 点击“转换并保存”，等待图标存档生成。
 5. 在“图标存档”中选择刚生成的存档并应用。

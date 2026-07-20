@@ -1,66 +1,54 @@
 package io.github.cl0ura.hypericonpack.hook
 
-import android.content.Context
-import android.database.ContentObserver
+import android.content.SharedPreferences
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
-import android.os.Handler
-import android.os.Looper
-import de.robv.android.xposed.XposedBridge
-import io.github.cl0ura.hypericonpack.config.IconConfigContract
 import io.github.cl0ura.hypericonpack.config.IconPackConfig
+import io.github.cl0ura.hypericonpack.config.IconRemoteConfig
 import io.github.cl0ura.hypericonpack.iconpack.ThemeAnimationAdaptiveDrawable
 import io.github.cl0ura.hypericonpack.iconpack.ThemeAnimationOutlineDrawable
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * The only remaining launcher-process runtime behaviour.
- *
- * App icons themselves are resolved entirely by HyperOS from the generated
- * /data/system/theme/icons archive.  This class never loads an icon pack or
- * replaces a desktop/folder Drawable; it only supplies the displayed themed
- * Drawable to the vendor launch/return transition and publishes an alpha-
- * derived outline for every static PNG shape.
- */
+/** Launcher-only animation state backed by libxposed remote preferences. */
 internal object ThemeAnimationRuntime {
-    private const val TAG = "HyperIconPack"
-
     private val lock = Any()
     private val bridgeLogged = AtomicBoolean(false)
-    private val mainHandler = Handler(Looper.getMainLooper())
 
     @Volatile
     private var config = IconPackConfig.disabled()
 
-    private var observerRegistered = false
-    private var retryAttempt = 0
+    private var preferences: SharedPreferences? = null
+    private var listener: SharedPreferences.OnSharedPreferenceChangeListener? = null
+    private var logger: ((String, Throwable?) -> Unit)? = null
 
-    fun initialize(context: Context) {
+    fun initialize(
+        remotePreferences: SharedPreferences,
+        logger: (String, Throwable?) -> Unit,
+    ) {
         synchronized(lock) {
-            if (observerRegistered) return
-            observerRegistered = true
-            reload(context)
-            val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-                override fun onChange(selfChange: Boolean) = reload(context)
-
-                override fun onChange(selfChange: Boolean, uri: android.net.Uri?) = reload(context)
+            shutdownLocked()
+            this.preferences = remotePreferences
+            this.logger = logger
+            val changeListener = SharedPreferences.OnSharedPreferenceChangeListener { preferences, key ->
+                // The companion writes revision last in one Editor transaction.
+                // Reload once per complete configuration instead of once for
+                // every individual key callback.
+                if (key == IconRemoteConfig.KEY_REVISION) reload(preferences)
             }
-            runCatching {
-                context.contentResolver.registerContentObserver(
-                    IconConfigContract.CONFIG_URI,
-                    false,
-                    observer,
-                )
-            }.onFailure { throwable ->
-                log("Unable to observe system-theme animation configuration", throwable)
-            }
+            listener = changeListener
+            remotePreferences.registerOnSharedPreferenceChangeListener(changeListener)
+            reload(remotePreferences)
         }
+    }
+
+    fun shutdown() {
+        synchronized(lock) { shutdownLocked() }
     }
 
     fun preferAnimationTargetDrawable(targetDrawable: Drawable?): Drawable? {
         if (!shouldBridgeAnimation() || targetDrawable == null) return null
         if (bridgeLogged.compareAndSet(false, true)) {
-            log("Theme animation bridge is using the displayed HyperOS icon with a shape-aware alpha outline")
+            log("Animation bridge is using the native HyperOS themed icon and its alpha outline")
         }
         return when (targetDrawable) {
             is AdaptiveIconDrawable,
@@ -72,39 +60,36 @@ internal object ThemeAnimationRuntime {
         }
     }
 
-    private fun reload(context: Context) {
-        config = IconConfigContract.read(context) { throwable ->
-            log("Unable to read system-theme animation configuration", throwable)
-        }
-        if (config.systemThemeActive && config.systemThemeAnimationBridge) {
-            retryAttempt = 0
-        }
+    private fun reload(preferences: SharedPreferences) {
+        config = runCatching { IconRemoteConfig.read(preferences) }
+            .getOrElse { throwable ->
+                log("Unable to read API 102 remote animation configuration", throwable)
+                IconPackConfig.disabled()
+            }
+        bridgeLogged.set(false)
         log(
-            "System-theme animation configuration loaded: active=${config.systemThemeActive}, " +
+            "Remote animation configuration loaded: active=${config.systemThemeActive}, " +
                 "bridge=${config.systemThemeAnimationBridge}, pack=${config.packageName ?: "none"}",
         )
-        scheduleRetryIfNeeded(context)
     }
 
-    /**
-     * During an early boot, Launcher can be created before the companion
-     * application's exported provider is ready.  A one-shot query would then
-     * permanently disable the bridge until the user changed a setting.  Keep
-     * a short bounded retry window; normal ContentObserver updates still win
-     * immediately once the provider comes online.
-     */
-    private fun scheduleRetryIfNeeded(context: Context) {
-        if (shouldBridgeAnimation() || retryAttempt >= RETRY_DELAYS_MILLIS.size) return
-        val delay = RETRY_DELAYS_MILLIS[retryAttempt++]
-        mainHandler.postDelayed({ reload(context) }, delay)
+    private fun shutdownLocked() {
+        val oldPreferences = preferences
+        val oldListener = listener
+        if (oldPreferences != null && oldListener != null) {
+            runCatching { oldPreferences.unregisterOnSharedPreferenceChangeListener(oldListener) }
+        }
+        preferences = null
+        listener = null
+        logger = null
+        config = IconPackConfig.disabled()
+        bridgeLogged.set(false)
     }
 
     private fun shouldBridgeAnimation(): Boolean =
         config.systemThemeActive && config.systemThemeAnimationBridge && config.packageName != null
 
     private fun log(message: String, throwable: Throwable? = null) {
-        XposedBridge.log(if (throwable == null) "$TAG: $message" else "$TAG: $message\n$throwable")
+        logger?.invoke(message, throwable)
     }
-
-    private val RETRY_DELAYS_MILLIS = longArrayOf(1_000L, 3_000L, 8_000L, 20_000L)
 }

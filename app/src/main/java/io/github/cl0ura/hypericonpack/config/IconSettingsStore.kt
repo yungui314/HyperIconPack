@@ -8,6 +8,7 @@ import io.github.cl0ura.hypericonpack.ui.AppThemePaletteStyle
 import io.github.cl0ura.hypericonpack.ui.AppUiMode
 import io.github.cl0ura.hypericonpack.ui.UiThemePreferences
 import io.github.cl0ura.hypericonpack.ui.withDynamicColor
+import io.github.cl0ura.hypericonpack.xposed.XposedServiceBridge
 import java.io.File
 
 /** Private storage used only by the module's own UI process. */
@@ -67,7 +68,7 @@ class IconSettingsStore(context: Context) {
             // luminance-preserving renderer.
             .remove("experimental_monet_fallbacks")
             .apply()
-        IconConfigContract.notifyChanged(appContext)
+        XposedServiceBridge.publishConfig(normalized)
         return normalized
     }
 

@@ -51,7 +51,9 @@
     </queries>
 
     <application
+        android:name=".HyperIconPackApplication"
         android:allowBackup="false"
+        android:description="@string/xposed_description"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -67,23 +69,8 @@
             </intent-filter>
         </activity>
 
-        <!--
-          Only exposes a non-sensitive, read-only configuration snapshot.
-          The injected com.miui.home process reads it through ContentResolver;
-          this avoids world-readable SharedPreferences on modern Android.
-        -->
-        <provider
-            android:name=".config.IconConfigProvider"
-            android:authorities="io.github.cl0ura.hypericonpack.config"
-            android:exported="true"
-            android:grantUriPermissions="false" />
-
-        <!--
-          New applications receive an immediate Xposed cache-miss icon and
-          this receiver subsequently writes only that package into a revised
-          static theme archive. The user never has to rerun all mappings just
-          because one app was installed.
-        -->
+        <!-- New applications are added to the native theme archive in one
+             coalesced background update; no live icon replacement is used. -->
         <receiver
             android:name=".systemtheme.PackageThemeArchiveUpdateReceiver"
             android:exported="false">
@@ -104,19 +91,5 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
-        <!-- Classic Xposed module metadata, understood by LSPosed as well. -->
-        <meta-data
-            android:name="xposedmodule"
-            android:value="true" />
-        <meta-data
-            android:name="xposedminversion"
-            android:value="82" />
-        <!-- Recommended, not enforced: LSPosed shows these two app scopes. -->
-        <meta-data
-            android:name="xposedscope"
-            android:resource="@array/xposedscope" />
-        <meta-data
-            android:name="xposeddescription"
-            android:value="Use standard third-party icon packs in Xiaomi HyperOS System Launcher." />
     </application>
 </manifest>

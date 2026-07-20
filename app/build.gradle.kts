@@ -27,8 +27,8 @@ android {
         applicationId = "io.github.cl0ura.hypericonpack"
         minSdk = 26
         targetSdk = 36
-        versionCode = 46
-        versionName = "0.9.35"
+        versionCode = 47
+        versionName = "0.9.36"
     }
 
     buildFeatures {
@@ -38,6 +38,7 @@ android {
 
     packaging {
         resources {
+            merges += "META-INF/xposed/*"
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
@@ -77,6 +78,8 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-icons:0.9.3")
     implementation("top.yukonga.miuix.kmp:miuix-blur:0.9.3")
 
-    // Never package the framework API in the APK: LSPosed/Xposed supplies it at runtime.
-    compileOnly("de.robv.android.xposed:api:82")
+    // The framework supplies the module API; the service library connects the
+    // companion app to API 102 scope, preferences and hot-reload state.
+    compileOnly("io.github.libxposed:api:102.0.0")
+    implementation("io.github.libxposed:service:102.0.0")
 }

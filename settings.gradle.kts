@@ -14,8 +14,6 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // The classic Xposed API artifact is published here.
-        maven(url = "https://api.xposed.info/")
     }
 }
 

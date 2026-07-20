@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -32,6 +33,7 @@ import io.github.cl0ura.hypericonpack.config.IconPackConfig
 import io.github.cl0ura.hypericonpack.config.IconSettingsStore
 import io.github.cl0ura.hypericonpack.systemtheme.HyperOsIconArchiveConverter
 import io.github.cl0ura.hypericonpack.systemtheme.RootThemeIconInstaller
+import io.github.cl0ura.hypericonpack.xposed.XposedServiceBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Card
@@ -84,6 +86,7 @@ private fun ModuleHomeOverview(
 ) {
     val context = LocalContext.current.applicationContext
     val settingsStore = remember(context) { IconSettingsStore(context) }
+    val xposedState by XposedServiceBridge.state.collectAsState()
     var refreshGeneration by rememberSaveable { mutableIntStateOf(0) }
     var snapshot by remember { mutableStateOf(ModuleStatusSnapshot.loading()) }
 
@@ -128,6 +131,7 @@ private fun ModuleHomeOverview(
             item { RuntimeStatusCard(snapshot) }
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
+                    HomeStatusRow("Xposed", xposedState.label, xposedState.api102Ready)
                     HomeStatusRow("Root", snapshot.rootLabel, snapshot.rootReady)
                     HomeStatusRow("图标来源", snapshot.sourceLabel, snapshot.archiveReady)
                     HomeStatusRow("系统主题", snapshot.themeLabel, snapshot.themeActive)
