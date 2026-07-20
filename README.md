@@ -92,31 +92,6 @@ HyperOS 桌面、文件夹、设置与系统界面
 - 动态日历会生成 HyperOS `dynamicicons` 资源；图标包若没有可分离的动态时钟图层，无法可靠生成动态时钟。
 - Monet 转换需要从复杂位图中提取前景层级，渐变、半透明和极细线条图标仍可能与源图存在视觉差异。
 
-## 构建
-
-要求 Android Studio / JDK 17，以及能获取 Android API 37 的 SDK 环境。
-
-```powershell
-.\gradlew.bat :app:assembleDebug
-```
-
-输出位置：
-
-```text
-app/build/outputs/apk/debug/app-debug.apk
-```
-
-正式版签名从环境变量读取，不会把密钥或口令写入仓库：
-
-```text
-HYPERICONPACK_STORE_FILE
-HYPERICONPACK_STORE_PASSWORD
-HYPERICONPACK_KEY_ALIAS
-HYPERICONPACK_KEY_PASSWORD
-```
-
-配置后运行 `.\gradlew.bat :app:assembleRelease` 即可生成签名 APK。
-
 ## 反馈与贡献
 
 提交问题时建议附上：
