@@ -792,6 +792,11 @@ internal object HyperOsIconArchiveConverter {
     )
         ?.let(::readArchiveInfo)
 
+    /** Reads metadata for the exact durable archive selected by the user. */
+    fun archiveInfo(archive: File?): ExistingArchiveInfo? = archive
+        ?.takeIf(File::isFile)
+        ?.let(::readArchiveInfo)
+
     /**
      * Adds/replaces just one installed package in an already validated static
      * archive. This is intentionally not a second full conversion: all of an

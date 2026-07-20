@@ -90,15 +90,16 @@ private fun ModuleHomeOverview(
     LaunchedEffect(refreshGeneration) {
         snapshot = withContext(Dispatchers.IO) {
             val config = settingsStore.read()
-            val archive = HyperOsIconArchiveConverter.existingArchiveInfo(
-                context = context,
-                iconPackPackage = config.packageName,
-                fallbackScaleMultiplier = config.fallbackScaleMultiplier,
-                globalMonetIcons = config.globalMonetIcons,
-                monetCustomColors = config.monetCustomColors,
-                monetBackgroundColor = config.monetBackgroundColor,
-                monetForegroundColor = config.monetForegroundColor,
-            )
+            val archive = HyperOsIconArchiveConverter.archiveInfo(settingsStore.readActiveArchive())
+                ?: HyperOsIconArchiveConverter.existingArchiveInfo(
+                    context = context,
+                    iconPackPackage = config.packageName,
+                    fallbackScaleMultiplier = config.fallbackScaleMultiplier,
+                    globalMonetIcons = config.globalMonetIcons,
+                    monetCustomColors = config.monetCustomColors,
+                    monetBackgroundColor = config.monetBackgroundColor,
+                    monetForegroundColor = config.monetForegroundColor,
+                )
             val root = RootAccess.check()
             val theme = if (root.success) RootThemeIconInstaller.status() else null
             val sourceName = HyperOsIconArchiveConverter.sourceLabel(
