@@ -13,7 +13,7 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/yungui314/HyperIconPack?style=flat-square"></a>
   <img alt="Android" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white">
   <img alt="Root" src="https://img.shields.io/badge/Root-required-E95420?style=flat-square">
-  <img alt="LSPosed" src="https://img.shields.io/badge/LSPosed-required-5B6ACD?style=flat-square">
+  <img alt="LSPosed API 102" src="https://img.shields.io/badge/LSPosed-API%20102-5B6ACD?style=flat-square">
 </p>
 
 ## 项目简介
@@ -79,6 +79,15 @@ HyperOS 桌面、文件夹、设置与系统界面
 6. 按页面提示重启桌面或设备，使系统各进程重新读取主题资源。
 
 转换会覆盖完整 `appfilter.xml` 映射，并为当前系统已安装的第三方应用、系统应用、禁用应用、无桌面入口应用和 Activity Alias 生成必要的包级资源。未适配内容比例建议从 `85%` 开始，再按图标包风格调整。
+
+## Xposed API 102
+
+- 模块要求支持 [libxposed API 102](https://libxposed.github.io/api/) 的 Xposed 框架。
+- 静态作用域固定为系统桌面 `com.miui.home`，仅处理启动与返回动画兼容；图标替换不依赖实时 Hook。
+- 模块配置通过 `RemotePreferences` 同步，不再使用旧版跨进程配置方案。
+- `autoHotReload` 用于安装新版 APK 后热重载模块代码，不会重启桌面，也不会替代 HyperOS 主题图标缓存刷新。
+- 应用或切换图标存档后，仍需按应用提示刷新桌面或重启设备，让相关系统进程重新读取 `/data/system/theme/icons`。
+- 从 `v0.9.34` 或更早的旧 API 版本升级时，建议首次升级后重启一次桌面或设备；后续 APK 更新可由 API 102 热重载。
 
 ## 实现边界
 
