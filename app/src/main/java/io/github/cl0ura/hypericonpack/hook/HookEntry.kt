@@ -59,6 +59,7 @@ class HookEntry : IXposedHookLoadPackage {
             SETTINGS_PACKAGE,
             SECURITY_CENTER_PACKAGE,
             MI_SETTINGS_PACKAGE,
+            PERSONAL_ASSISTANT_PACKAGE,
             -> {
                 installApplicationAttachHook { context -> SystemThemeArchiveRuntime.initialize(context) }
                 installPackageManagerIconBridge(lpparam)
@@ -463,6 +464,7 @@ class HookEntry : IXposedHookLoadPackage {
         const val SETTINGS_PACKAGE = "com.android.settings"
         const val SECURITY_CENTER_PACKAGE = "com.miui.securitycenter"
         const val MI_SETTINGS_PACKAGE = "com.xiaomi.misettings"
+        const val PERSONAL_ASSISTANT_PACKAGE = "com.miui.personalassistant"
 
         const val STATUS_BAR_ICON_VIEW = "com.android.systemui.statusbar.StatusBarIconView"
         const val STATUS_BAR_ICON = "com.android.internal.statusbar.StatusBarIcon"

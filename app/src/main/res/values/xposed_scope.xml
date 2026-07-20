@@ -12,5 +12,6 @@
         <item>com.android.settings</item>
         <item>com.miui.securitycenter</item>
         <item>com.xiaomi.misettings</item>
+        <item>com.miui.personalassistant</item>
     </string-array>
 </resources>

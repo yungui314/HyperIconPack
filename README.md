@@ -77,6 +77,7 @@ HyperOS 桌面、文件夹、设置与系统界面
    - 系统界面 `com.android.systemui`
    - 设置 `com.android.settings`
    - 手机管家 `com.miui.securitycenter`
+   - 小组件中心 `com.miui.personalassistant`
    - 若设备存在，可额外勾选 `com.xiaomi.misettings`
 3. 打开“设置 > 制作图标包”，选择图标来源、适配比例和 Monet 设置。
 4. 点击“转换并保存”，等待图标存档生成。

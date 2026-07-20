@@ -33,10 +33,11 @@ internal object RootAccess {
     fun restartSystemUi(): Result = runFixed("pkill -f com.android.systemui")
 
     /**
-     * Reloads the two long-lived icon consumers exactly once after a user
-     * applies or restores an archive. A normal TERM lets Android restart the
-     * processes without leaving Launcher force-stopped, and guarantees that a
-     * newly enabled LSPosed module is injected without requiring a full reboot.
+     * Reloads long-lived icon consumers exactly once after a user applies or
+     * restores an archive. Launcher and SystemUI are allowed to restart
+     * immediately. Personal Assistant owns HyperOS' widget picker and keeps a
+     * separate app-icon cache, so it is stopped and left to restart lazily the
+     * next time the picker or one of its widgets is opened.
      */
     fun restartIconSurfaces(): Result = runFixed(
         command = RESTART_ICON_SURFACES_COMMAND,
@@ -136,9 +137,11 @@ internal object RootAccess {
     private val RESTART_ICON_SURFACES_COMMAND = """
         old_launcher="${'$'}(pidof com.miui.home 2>/dev/null || true)"
         old_systemui="${'$'}(pidof com.android.systemui 2>/dev/null || true)"
+        old_widget_picker="${'$'}(pidof com.miui.personalassistant 2>/dev/null || true)"
 
         for process_id in ${'$'}old_launcher; do kill -TERM "${'$'}process_id" 2>/dev/null || true; done
         for process_id in ${'$'}old_systemui; do kill -TERM "${'$'}process_id" 2>/dev/null || true; done
+        for process_id in ${'$'}old_widget_picker; do kill -TERM "${'$'}process_id" 2>/dev/null || true; done
 
         wait_for_restart() {
           package_name="${'$'}1"
@@ -167,6 +170,9 @@ internal object RootAccess {
           [ -n "${'$'}(pidof com.miui.home 2>/dev/null || true)" ] || exit 74
         fi
         [ "${'$'}systemui_result" -eq 0 ] || exit 75
+        if [ -n "${'$'}old_widget_picker" ]; then
+          echo "com.miui.personalassistant stopped for lazy restart: ${'$'}old_widget_picker"
+        fi
         echo 'HYPER_ICONPACK_SURFACES_RESTARTED'
     """.trimIndent()
 }
