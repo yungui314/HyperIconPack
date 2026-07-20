@@ -11,9 +11,9 @@ import android.graphics.drawable.Icon
 import android.os.Bundle
 import android.os.IBinder
 import android.provider.Settings
-import android.util.Log
 import androidx.core.content.ContextCompat
 import io.github.cl0ura.hypericonpack.R
+import io.github.cl0ura.hypericonpack.logging.AppLog
 import io.github.cl0ura.hypericonpack.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -72,7 +72,7 @@ internal object IconArchiveConversionController {
         }.getOrElse { throwable ->
             val message = throwable.message ?: throwable.javaClass.simpleName
             mutableState.value = IconArchiveConversionState.Failed(request, message)
-            Log.e("HyperIconPack", "Unable to start conversion service", throwable)
+            AppLog.error(context, "Unable to start conversion service", throwable)
             false
         }
     }
@@ -107,7 +107,7 @@ class IconArchiveConversionService : Service() {
         val initial = IconArchiveConversionState.Running(request, null)
         IconArchiveConversionController.publish(initial)
         startForeground(NOTIFICATION_ID, buildNotification(initial))
-        Log.i(TAG, "Conversion started: ${request.sourceLabel}")
+        AppLog.info(this, "Conversion started: ${request.sourceLabel}")
 
         conversionJob = serviceScope.launch {
             val result = runCatching {
@@ -142,14 +142,21 @@ class IconArchiveConversionService : Service() {
                     )
                     IconArchiveConversionController.publish(state)
                     notificationManager.notify(NOTIFICATION_ID, buildNotification(state))
-                    Log.i(TAG, "Conversion completed: ${archive.archive.name}, icons=${state.convertedIcons}")
+                    AppLog.info(
+                        this@IconArchiveConversionService,
+                        "Conversion completed: ${archive.archive.name}, icons=${state.convertedIcons}",
+                    )
                 },
                 onFailure = { throwable ->
                     val message = throwable.message ?: throwable.javaClass.simpleName
                     val state = IconArchiveConversionState.Failed(request, message)
                     IconArchiveConversionController.publish(state)
                     notificationManager.notify(NOTIFICATION_ID, buildNotification(state))
-                    Log.e(TAG, "Conversion failed: ${request.sourceLabel}", throwable)
+                    AppLog.error(
+                        this@IconArchiveConversionService,
+                        "Conversion failed: ${request.sourceLabel}",
+                        throwable,
+                    )
                 },
             )
             conversionFinished = true
@@ -166,7 +173,7 @@ class IconArchiveConversionService : Service() {
                 IconArchiveConversionController.publish(
                     IconArchiveConversionState.Failed(running.request, "转换任务被系统中断"),
                 )
-                Log.w(TAG, "Conversion service stopped before completion")
+                AppLog.warning(this, "Conversion service stopped before completion")
             }
         }
         serviceScope.cancel()
@@ -368,8 +375,8 @@ class IconArchiveConversionService : Service() {
             setShowBadge(false)
         }
         notificationManager.createNotificationChannel(channel)
-        Log.i(
-            TAG,
+        AppLog.info(
+            this,
             "Island support=${supportsIsland()}, protocol=${focusProtocolVersion()}, focusPermission=${hasFocusPermission()}",
         )
     }
@@ -395,7 +402,6 @@ class IconArchiveConversionService : Service() {
     }.getOrDefault(false)
 
     companion object {
-        private const val TAG = "HyperIconPack"
         private const val CHANNEL_ID = "icon_archive_conversion"
         private const val NOTIFICATION_ID = 3917
         private const val ISLAND_RUNNING_COLOR = "#006EFF"

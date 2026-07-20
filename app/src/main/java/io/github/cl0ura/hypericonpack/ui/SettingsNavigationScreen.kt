@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import io.github.cl0ura.hypericonpack.config.IconPackConfig
 import io.github.cl0ura.hypericonpack.config.IconSettingsStore
+import io.github.cl0ura.hypericonpack.logging.AppLog
 import io.github.cl0ura.hypericonpack.iconpack.IconPackDescriptor
 import io.github.cl0ura.hypericonpack.iconpack.IconPackDiscovery
 import io.github.cl0ura.hypericonpack.systemtheme.HyperOsIconArchiveConverter
@@ -199,6 +200,7 @@ private fun SettingsOverviewPage(
             val result = withContext(Dispatchers.IO) { RootThemeIconInstaller.restore() }
             restoreSummary = if (result.success) {
                 settingsStore.writeActiveArchive(null)
+                val refresh = withContext(Dispatchers.IO) { RootAccess.restartIconSurfaces() }
                 settingsStore.write(
                     settingsStore.read().copy(
                         packageName = null,
@@ -206,8 +208,17 @@ private fun SettingsOverviewPage(
                         systemThemeAnimationBridge = false,
                     ),
                 )
-                "已恢复系统原本图标"
+                AppLog.info(
+                    context,
+                    "Restored system icons; surfacesRestarted=${refresh.success}; ${refresh.output}",
+                )
+                if (refresh.success) {
+                    "已恢复系统原本图标，桌面与系统界面已刷新"
+                } else {
+                    "已恢复系统图标；界面刷新未完成，建议重启设备"
+                }
             } else {
+                AppLog.warning(context, "System icon restore failed: ${result.output}")
                 "恢复失败：${result.output.ifBlank { "请检查 Root 授权" }}"
             }
             restoring = false
@@ -488,6 +499,7 @@ private fun ConvertedArchivesPage(
             val result = withContext(Dispatchers.IO) { RootThemeIconInstaller.install(archive.archive) }
             actionSummary = if (result.success) {
                 settingsStore.writeActiveArchive(archive.archive)
+                val refresh = withContext(Dispatchers.IO) { RootAccess.restartIconSurfaces() }
                 settingsStore.write(
                     settingsStore.read().copy(
                         packageName = sourcePackage,
@@ -504,8 +516,20 @@ private fun ConvertedArchivesPage(
                 if (settingsStore.pendingThemeArchivePackageUpdates().isNotEmpty()) {
                     PackageThemeArchiveUpdateScheduler.schedule(context)
                 }
-                "已应用 ${sourceLabels[sourcePackage] ?: HyperOsIconArchiveConverter.sourceLabel(sourcePackage)}"
+                val sourceName = sourceLabels[sourcePackage]
+                    ?: HyperOsIconArchiveConverter.sourceLabel(sourcePackage)
+                AppLog.info(
+                    context,
+                    "Applied archive ${archive.archive.name} from $sourceName; " +
+                        "surfacesRestarted=${refresh.success}; ${refresh.output}",
+                )
+                if (refresh.success) {
+                    "已应用 $sourceName，桌面与系统界面已刷新"
+                } else {
+                    "已应用 $sourceName；界面刷新未完成，建议重启设备"
+                }
             } else {
+                AppLog.warning(context, "Archive apply failed: ${archive.archive.name}; ${result.output}")
                 "应用失败：${result.output.ifBlank { "请检查 Root 授权" }}"
             }
             activeActionPath = null

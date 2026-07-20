@@ -811,9 +811,42 @@ internal object HyperOsIconArchiveConverter {
         monetBackgroundColor: Int,
         monetForegroundColor: Int,
         packageName: String,
+    ): File = updateInstalledPackages(
+        context = context,
+        baseArchive = baseArchive,
+        iconPackPackage = iconPackPackage,
+        fallbackScaleMultiplier = fallbackScaleMultiplier,
+        globalMonetIcons = globalMonetIcons,
+        monetCustomColors = monetCustomColors,
+        monetBackgroundColor = monetBackgroundColor,
+        monetForegroundColor = monetForegroundColor,
+        packageNames = listOf(packageName),
+    )
+
+    /**
+     * Persists a coalesced package-install batch with one icon-pack parse and
+     * one ZIP rewrite. App stores commonly update several packages together;
+     * rewriting and installing the complete 30-150 MB archive once per package
+     * wastes I/O and can keep Launcher under storage pressure for minutes.
+     */
+    internal fun updateInstalledPackages(
+        context: Context,
+        baseArchive: File,
+        iconPackPackage: String,
+        fallbackScaleMultiplier: Float,
+        globalMonetIcons: Boolean,
+        monetCustomColors: Boolean,
+        monetBackgroundColor: Int,
+        monetForegroundColor: Int,
+        packageNames: Collection<String>,
     ): File {
         require(baseArchive.isFile) { "缺少当前主题归档" }
-        require(packageName.isNotBlank()) { "安装包名为空" }
+        val requestedPackages = packageNames.asSequence()
+            .filter(String::isNotBlank)
+            .distinct()
+            .sorted()
+            .toList()
+        require(requestedPackages.isNotEmpty()) { "安装包名为空" }
         val baseInfo = readArchiveInfo(baseArchive)
             ?: throw IllegalStateException("当前主题归档元数据无法读取")
         require(baseInfo.isCurrentFormat) { "当前主题归档格式过旧，需要先重新转换一次" }
@@ -831,12 +864,6 @@ internal object HyperOsIconArchiveConverter {
             "当前主题适配比例与活动配置不一致"
         }
 
-        val applicationInfo = context.packageManager.getApplicationInfo(
-            packageName,
-            PackageManager.MATCH_DISABLED_COMPONENTS,
-        )
-        val rawIcon = rawApplicationIcon(context, applicationInfo)
-            ?: throw IllegalStateException("无法读取新安装应用的原始图标")
         var parseFailure: Throwable? = null
         val pack = if (isOriginalIconSource(iconPackPackage)) {
             null
@@ -844,8 +871,25 @@ internal object HyperOsIconArchiveConverter {
             ParsedIconPack.load(context, iconPackPackage) { parseFailure = it }
                 ?: throw IllegalStateException("无法读取当前图标包", parseFailure)
         }
-        val mappedDrawable = mappedPackageDrawable(pack, packageName, prepareForMonet = globalMonetIcons)
-        val preparedFallback = bestPackageDrawable(
+        val palette = if (globalMonetIcons) {
+            SystemMonetIconPalette.global(context, monetCustomColors, monetBackgroundColor, monetForegroundColor)
+        } else {
+            null
+        }
+        val launchEntriesByPackage = launchableActivities(context)
+            .mapNotNull { info -> componentName(info)?.let { info.packageName to archiveEntryName(it) } }
+            .groupBy(keySelector = { it.first }, valueTransform = { it.second })
+        val replacementEntries = linkedMapOf<String, ByteArray>()
+
+        requestedPackages.forEach { packageName ->
+            val applicationInfo = context.packageManager.getApplicationInfo(
+                packageName,
+                PackageManager.MATCH_DISABLED_COMPONENTS,
+            )
+            val rawIcon = rawApplicationIcon(context, applicationInfo)
+                ?: throw IllegalStateException("无法读取 $packageName 的原始图标")
+            val mappedDrawable = mappedPackageDrawable(pack, packageName, prepareForMonet = globalMonetIcons)
+            val preparedFallback = bestPackageDrawable(
                 pack = pack,
                 packageName = packageName,
                 rawIcon = rawIcon,
@@ -854,35 +898,27 @@ internal object HyperOsIconArchiveConverter {
                 systemAdaptiveMask = null,
                 prepareForMonet = globalMonetIcons,
             )
-        val rawNativeMonochrome = if (globalMonetIcons && mappedDrawable == null) {
-            nativeMonochromeSource(rawIcon)
-        } else {
-            null
-        }
-        val nativeMonochrome = rawNativeMonochrome?.let { native ->
-            preparedFallback?.let { silhouette ->
-                native.copy(silhouette = silhouette, recoveryDrawable = silhouette)
-            } ?: native
-        }
-        val styledDrawable = mappedDrawable ?: nativeMonochrome?.glyph ?: preparedFallback
-            ?: throw IllegalStateException("无法构造新安装应用的图标样式")
-        val palette = if (globalMonetIcons) {
-            SystemMonetIconPalette.global(context, monetCustomColors, monetBackgroundColor, monetForegroundColor)
-        } else {
-            null
-        }
-        val packagePng = renderIncrementalPng(styledDrawable, palette, nativeMonochrome)
-            ?: throw IllegalStateException("无法渲染新安装应用的图标")
-        val launchEntries = launchableActivities(context)
-            .filter { it.packageName == packageName }
-            .mapNotNull(::componentName)
-            .map(::archiveEntryName)
-            .distinct()
-        val replacementEntries = linkedMapOf<String, ByteArray>().apply {
-            put(packageArchiveEntryName(packageName), packagePng)
-            launchEntries.forEach { entryName -> put(entryName, packagePng) }
+            val rawNativeMonochrome = if (globalMonetIcons && mappedDrawable == null) {
+                nativeMonochromeSource(rawIcon)
+            } else {
+                null
+            }
+            val nativeMonochrome = rawNativeMonochrome?.let { native ->
+                preparedFallback?.let { silhouette ->
+                    native.copy(silhouette = silhouette, recoveryDrawable = silhouette)
+                } ?: native
+            }
+            val styledDrawable = mappedDrawable ?: nativeMonochrome?.glyph ?: preparedFallback
+                ?: throw IllegalStateException("无法构造 $packageName 的图标样式")
+            val packagePng = renderIncrementalPng(styledDrawable, palette, nativeMonochrome)
+                ?: throw IllegalStateException("无法渲染 $packageName 的图标")
+            replacementEntries[packageArchiveEntryName(packageName)] = packagePng
+            launchEntriesByPackage[packageName].orEmpty().distinct().forEach { entryName ->
+                replacementEntries[entryName] = packagePng
+            }
         }
 
+        val scopeFingerprint = applicationScopeFingerprint(context)
         val destination = archiveFile(
             context = context,
             iconPackPackage = iconPackPackage,
@@ -891,7 +927,7 @@ internal object HyperOsIconArchiveConverter {
             monetCustomColors = monetCustomColors,
             monetBackgroundColor = monetBackgroundColor,
             monetForegroundColor = monetForegroundColor,
-            applicationScopeFingerprint = applicationScopeFingerprint(context),
+            applicationScopeFingerprint = scopeFingerprint,
             createDirectory = true,
         )
         val temporary = File(destination.parentFile, "${destination.name}.package-update")
@@ -907,7 +943,7 @@ internal object HyperOsIconArchiveConverter {
                         monetCustomColors = monetCustomColors,
                         monetBackgroundColor = monetBackgroundColor,
                         monetForegroundColor = monetForegroundColor,
-                        applicationScopeFingerprint = applicationScopeFingerprint(context),
+                        applicationScopeFingerprint = scopeFingerprint,
                     )
                     input.entries().asSequence().forEach { entry ->
                         if (entry.name == METADATA_ENTRY || entry.name in replacementEntries) return@forEach

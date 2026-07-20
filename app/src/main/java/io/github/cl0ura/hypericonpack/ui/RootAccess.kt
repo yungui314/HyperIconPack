@@ -1,5 +1,7 @@
 package io.github.cl0ura.hypericonpack.ui
 
+import android.content.Context
+import io.github.cl0ura.hypericonpack.logging.AppLog
 import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -30,18 +32,27 @@ internal object RootAccess {
 
     fun restartSystemUi(): Result = runFixed("pkill -f com.android.systemui")
 
-    /** User-initiated full reboot for surfaces whose caches survive process restarts. */
-    fun rebootSystem(): Result = runFixed("svc power reboot")
-
-    /** Reads app-process records emitted with the module's dedicated Android tag. */
-    fun readAppLogs(): Result = runFixed(
-        "logcat -d -v threadtime HyperIconPack:V '*:S' | tail -n 500",
+    /**
+     * Reloads the two long-lived icon consumers exactly once after a user
+     * applies or restores an archive. A normal TERM lets Android restart the
+     * processes without leaving Launcher force-stopped, and guarantees that a
+     * newly enabled LSPosed module is injected without requiring a full reboot.
+     */
+    fun restartIconSurfaces(): Result = runFixed(
+        command = RESTART_ICON_SURFACES_COMMAND,
         timeoutSeconds = 20L,
     )
 
+    /** User-initiated full reboot for surfaces whose caches survive process restarts. */
+    fun rebootSystem(): Result = runFixed("svc power reboot")
+
+    /** Reads the bounded persistent log, which survives logcat rotation and reboots. */
+    fun readAppLogs(context: Context): Result = Result(true, AppLog.read(context))
+
     /** Reads LSPosed bridge output from both logcat and LSPosed's module log files. */
     fun readXposedLogs(): Result = runFixed(
-        "(logcat -d -v threadtime LSPosed-Bridge:V LSPosed:V Xposed:V '*:S' 2>/dev/null; " +
+        "(logcat -b all -d -v threadtime 2>/dev/null | " +
+            "grep -E 'LSPosed|Xposed' | grep -F HyperIconPack; " +
             "tail -n 3000 /data/adb/lspd/log/modules_*.log " +
             "/data/adb/lspd/log/verbose_*.log 2>/dev/null) | " +
             "grep -F HyperIconPack | tail -n 500",
@@ -121,4 +132,41 @@ internal object RootAccess {
             Result(false, throwable.javaClass.simpleName + ": " + (throwable.message ?: "无法执行 su"))
         }
     }
+
+    private val RESTART_ICON_SURFACES_COMMAND = """
+        old_launcher="${'$'}(pidof com.miui.home 2>/dev/null || true)"
+        old_systemui="${'$'}(pidof com.android.systemui 2>/dev/null || true)"
+
+        for process_id in ${'$'}old_launcher; do kill -TERM "${'$'}process_id" 2>/dev/null || true; done
+        for process_id in ${'$'}old_systemui; do kill -TERM "${'$'}process_id" 2>/dev/null || true; done
+
+        wait_for_restart() {
+          package_name="${'$'}1"
+          old_processes="${'$'}2"
+          attempt=0
+          while [ "${'$'}attempt" -lt 40 ]; do
+            current_processes="${'$'}(pidof "${'$'}package_name" 2>/dev/null || true)"
+            if [ -n "${'$'}current_processes" ] && [ "${'$'}current_processes" != "${'$'}old_processes" ]; then
+              echo "${'$'}package_name restarted: ${'$'}current_processes"
+              return 0
+            fi
+            sleep 0.25
+            attempt=${'$'}((attempt + 1))
+          done
+          return 1
+        }
+
+        launcher_result=0
+        systemui_result=0
+        wait_for_restart com.miui.home "${'$'}old_launcher" || launcher_result=${'$'}?
+        wait_for_restart com.android.systemui "${'$'}old_systemui" || systemui_result=${'$'}?
+
+        if [ "${'$'}launcher_result" -ne 0 ]; then
+          cmd activity start-activity -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null 2>&1 || true
+          sleep 1
+          [ -n "${'$'}(pidof com.miui.home 2>/dev/null || true)" ] || exit 74
+        fi
+        [ "${'$'}systemui_result" -eq 0 ] || exit 75
+        echo 'HYPER_ICONPACK_SURFACES_RESTARTED'
+    """.trimIndent()
 }

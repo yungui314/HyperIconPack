@@ -27,11 +27,6 @@ internal object ManagedIconProviderRuntime {
         val sourcePackage = config.packageName ?: return null
         if (!config.systemThemeActive || packageName.isBlank()) return null
 
-        // Run the cheap status/repair check even for a provider-memory cache
-        // hit. Theme Manager can delete the root archive while this process
-        // remains alive; returning cached bytes must not suppress recovery.
-        ThemeArchiveRepairScheduler.scheduleOnce(context)
-
         val key = "${config.revision}|$packageName"
         synchronized(cache) { cache.get(key) }?.let { return it }
 

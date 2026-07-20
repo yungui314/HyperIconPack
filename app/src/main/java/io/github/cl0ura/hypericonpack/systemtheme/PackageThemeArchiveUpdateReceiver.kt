@@ -3,8 +3,8 @@ package io.github.cl0ura.hypericonpack.systemtheme
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import io.github.cl0ura.hypericonpack.config.IconSettingsStore
+import io.github.cl0ura.hypericonpack.logging.AppLog
 
 /**
  * Records package installation/update events and hands the ZIP rewrite to a
@@ -32,10 +32,6 @@ class PackageThemeArchiveUpdateReceiver : BroadcastReceiver() {
 
         settings.enqueueThemeArchivePackageUpdate(packageName)
         val scheduled = PackageThemeArchiveUpdateScheduler.schedule(appContext)
-        Log.i(TAG, "Queued $packageName for incremental theme archive update (scheduled=$scheduled)")
-    }
-
-    private companion object {
-        const val TAG = "HyperIconPack"
+        AppLog.info(context, "Queued $packageName for incremental theme archive update (scheduled=$scheduled)")
     }
 }

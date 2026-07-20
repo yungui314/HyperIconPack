@@ -6,12 +6,11 @@ import android.app.job.JobScheduler
 import android.app.job.JobService
 import android.content.ComponentName
 import android.content.Context
-import android.util.Log
 import io.github.cl0ura.hypericonpack.config.IconSettingsStore
+import io.github.cl0ura.hypericonpack.logging.AppLog
 
 /** Schedules durable, process-safe updates after an app is installed. */
 internal object PackageThemeArchiveUpdateScheduler {
-    private const val TAG = "HyperIconPack"
     private const val JOB_ID = 0x48495031 // "HIP1"
 
     fun schedule(context: Context): Boolean {
@@ -29,8 +28,12 @@ internal object PackageThemeArchiveUpdateScheduler {
         return scheduler.schedule(job) == JobScheduler.RESULT_SUCCESS
     }
 
-    fun log(message: String, throwable: Throwable? = null) {
-        if (throwable == null) Log.i(TAG, message) else Log.w(TAG, message, throwable)
+    fun log(context: Context, message: String, throwable: Throwable? = null) {
+        if (throwable == null) {
+            AppLog.info(context, message)
+        } else {
+            AppLog.warning(context, message, throwable)
+        }
     }
 }
 
@@ -57,77 +60,78 @@ private object PackageThemeArchiveUpdateWorker {
         val settings = IconSettingsStore(context)
         val pending = settings.pendingThemeArchivePackageUpdates()
         if (pending.isEmpty()) return false
+        val config = settings.read()
+        if (!config.systemThemeActive || config.packageName == null) {
+            pending.forEach(settings::markThemeArchivePackageUpdateComplete)
+            return false
+        }
+        pending.filter { it == config.packageName }.forEach(settings::markThemeArchivePackageUpdateComplete)
+        val targetPackages = pending.filter { it != config.packageName }
+        if (targetPackages.isEmpty()) return false
 
-        var needsRetry = false
-        var installedAny = false
-        pending.forEach { packageName ->
-            try {
-                val config = settings.read()
-                if (!config.systemThemeActive || config.packageName == null || packageName == config.packageName) {
-                    settings.markThemeArchivePackageUpdateComplete(packageName)
-                    return@forEach
+        val baseArchive = settings.readActiveArchive()
+            ?: HyperOsIconArchiveConverter.cachedArchiveInfos(context)
+                .asSequence()
+                .filter { info ->
+                    info.iconPackPackage == config.packageName &&
+                        info.globalMonetIcons == config.globalMonetIcons &&
+                        info.monetCustomColors == (config.globalMonetIcons && config.monetCustomColors) &&
+                        (!config.globalMonetIcons || !config.monetCustomColors ||
+                            (info.monetBackgroundColor == config.monetBackgroundColor &&
+                                info.monetForegroundColor == config.monetForegroundColor)) &&
+                        info.fallbackScaleMultiplier?.let {
+                            kotlin.math.abs(it - config.fallbackScaleMultiplier) < 0.001f
+                        } == true
                 }
-                val baseArchive = settings.readActiveArchive()
-                    ?: HyperOsIconArchiveConverter.cachedArchiveInfos(context)
-                        .asSequence()
-                        .filter { info ->
-                            info.iconPackPackage == config.packageName &&
-                                info.globalMonetIcons == config.globalMonetIcons &&
-                                info.monetCustomColors == (config.globalMonetIcons && config.monetCustomColors) &&
-                                (!config.globalMonetIcons || !config.monetCustomColors ||
-                                    (info.monetBackgroundColor == config.monetBackgroundColor &&
-                                        info.monetForegroundColor == config.monetForegroundColor)) &&
-                                info.fallbackScaleMultiplier?.let {
-                                    kotlin.math.abs(it - config.fallbackScaleMultiplier) < 0.001f
-                                } == true
-                        }
-                        .maxByOrNull { info -> info.archive.lastModified() }
-                        ?.archive
-                if (baseArchive == null) {
-                    // This happens only before the user has applied one v16
-                    // archive. Keep the event in the queue; the immediate
-                    // launcher bridge continues to cover the icon meanwhile.
-                    PackageThemeArchiveUpdateScheduler.log(
-                        "PACKAGE_UPDATE $packageName deferred: no current managed archive",
-                    )
-                    needsRetry = true
-                    return@forEach
-                }
-                val updated = HyperOsIconArchiveConverter.updateInstalledPackage(
-                    context = context,
-                    baseArchive = baseArchive,
-                    iconPackPackage = config.packageName,
-                    fallbackScaleMultiplier = config.fallbackScaleMultiplier,
-                    globalMonetIcons = config.globalMonetIcons,
-                    monetCustomColors = config.monetCustomColors,
-                    monetBackgroundColor = config.monetBackgroundColor,
-                    monetForegroundColor = config.monetForegroundColor,
-                    packageName = packageName,
+                .maxByOrNull { info -> info.archive.lastModified() }
+                ?.archive
+        if (baseArchive == null) {
+            PackageThemeArchiveUpdateScheduler.log(
+                context,
+                "PACKAGE_UPDATE batch deferred: no current managed archive (${targetPackages.size} packages)",
+            )
+            return true
+        }
+
+        return try {
+            val updated = HyperOsIconArchiveConverter.updateInstalledPackages(
+                context = context,
+                baseArchive = baseArchive,
+                iconPackPackage = config.packageName,
+                fallbackScaleMultiplier = config.fallbackScaleMultiplier,
+                globalMonetIcons = config.globalMonetIcons,
+                monetCustomColors = config.monetCustomColors,
+                monetBackgroundColor = config.monetBackgroundColor,
+                monetForegroundColor = config.monetForegroundColor,
+                packageNames = targetPackages,
+            )
+            val install = RootThemeIconInstaller.install(updated)
+            if (!install.success) {
+                PackageThemeArchiveUpdateScheduler.log(
+                    context,
+                    "PACKAGE_UPDATE batch install failed: ${install.output}",
                 )
-                val install = RootThemeIconInstaller.install(updated)
-                if (install.success) {
-                    settings.writeActiveArchive(updated)
-                    settings.markThemeArchivePackageUpdateComplete(packageName)
-                    installedAny = true
-                    PackageThemeArchiveUpdateScheduler.log(
-                        "PACKAGE_UPDATE $packageName persisted into ${updated.name}",
-                    )
-                } else {
-                    needsRetry = true
-                    PackageThemeArchiveUpdateScheduler.log(
-                        "PACKAGE_UPDATE $packageName archive install failed: ${install.output}",
-                    )
-                }
-            } catch (throwable: Throwable) {
-                needsRetry = true
-                PackageThemeArchiveUpdateScheduler.log("PACKAGE_UPDATE $packageName failed", throwable)
+                true
+            } else {
+                settings.writeActiveArchive(updated)
+                targetPackages.forEach(settings::markThemeArchivePackageUpdateComplete)
+                // This revision only invalidates the module's small in-memory
+                // icon caches. It no longer emits a theme broadcast or reloads
+                // Launcher/SystemUI.
+                settings.touch()
+                PackageThemeArchiveUpdateScheduler.log(
+                    context,
+                    "PACKAGE_UPDATE batch persisted ${targetPackages.size} packages into ${updated.name}",
+                )
+                settings.pendingThemeArchivePackageUpdates().isNotEmpty()
             }
+        } catch (throwable: Throwable) {
+            PackageThemeArchiveUpdateScheduler.log(
+                context,
+                "PACKAGE_UPDATE batch failed (${targetPackages.size} packages)",
+                throwable,
+            )
+            true
         }
-        if (installedAny) {
-            // One revision notification after the complete queued batch avoids
-            // repeatedly clearing HyperOS icon caches for back-to-back installs.
-            settings.touch()
-        }
-        return needsRetry || settings.pendingThemeArchivePackageUpdates().isNotEmpty()
     }
 }

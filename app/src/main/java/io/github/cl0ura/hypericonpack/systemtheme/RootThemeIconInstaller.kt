@@ -68,7 +68,7 @@ internal object RootThemeIconInstaller {
         if (!result.success || !result.output.contains("HYPER_ICONPACK_INSTALL_OK")) {
             return Result(false, result.output)
         }
-        return refreshAfterThemeMutation(result.output, action = "安装")
+        return Result(true, result.output)
     }
 
     /**
@@ -84,27 +84,7 @@ internal object RootThemeIconInstaller {
         if (!result.success || !result.output.contains("HYPER_ICONPACK_RESTORE_OK")) {
             return Result(false, result.output)
         }
-        return refreshAfterThemeMutation(result.output, action = "恢复")
-    }
-
-    /**
-     * HyperOS Theme Manager emits this dynamic broadcast after a theme
-     * transaction. We are writing the same private `icons` archive directly,
-     * so retain its final notification instead of killing the launcher. The
-     * launcher-side Xposed runtime additionally observes the post-install
-     * configuration revision and invokes MiuiConfiguration's native cache
-     * invalidation API before re-sending this notification.
-     */
-    private fun refreshAfterThemeMutation(installOutput: String, action: String): Result {
-        val refresh = RootAccess.runFixed(THEME_CHANGED_BROADCAST, timeoutSeconds = 20L)
-        return if (refresh.success && refresh.output.contains("HYPER_ICONPACK_THEME_REFRESH_OK")) {
-            Result(true, "$installOutput\nHYPER_ICONPACK_THEME_REFRESH_OK")
-        } else {
-            // The archive is already atomically active.  Preserve that success
-            // rather than claiming an install failure merely because an OEM
-            // removed/renamed a dynamic receiver on a future build.
-            Result(true, "$installOutput\n主题已$action；主题刷新广播未确认，请返回桌面后稍候刷新。${refresh.output}")
-        }
+        return Result(true, result.output)
     }
 
     /**
@@ -260,12 +240,6 @@ internal object RootThemeIconInstaller {
         else
           echo 'HYPER_ICONPACK_THEME_REPLACED'
         fi
-    """.trimIndent()
-
-    private val THEME_CHANGED_BROADCAST = """
-        set -e
-        am broadcast --user 0 --receiver-foreground -a miui.intent.action.ACTION_THEME_CHANGED
-        echo 'HYPER_ICONPACK_THEME_REFRESH_OK'
     """.trimIndent()
 
     private val STAGE_DYNAMIC_COMMAND = """

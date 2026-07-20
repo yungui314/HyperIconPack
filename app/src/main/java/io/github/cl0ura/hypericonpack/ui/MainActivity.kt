@@ -19,7 +19,9 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import io.github.cl0ura.hypericonpack.BuildConfig
 import io.github.cl0ura.hypericonpack.config.IconSettingsStore
+import io.github.cl0ura.hypericonpack.logging.AppLog
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.blur.layerBackdrop
@@ -33,6 +35,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppLog.info(applicationContext, "Application opened, version=${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         enableEdgeToEdge()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.isNavigationBarContrastEnforced = false

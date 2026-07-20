@@ -33,7 +33,6 @@ class HookEntry : IXposedHookLoadPackage {
             LAUNCHER_PACKAGE -> if (lpparam.processName == LAUNCHER_PACKAGE) {
                 installApplicationAttachHook { context ->
                     ThemeAnimationRuntime.initialize(context)
-                    HyperOsThemeRefreshRuntime.initialize(context)
                     // This remains a static-theme architecture. The reader is
                     // only an emergency presentation bridge for the rare OEM
                     // cache miss where IconCustomizer returns null even though

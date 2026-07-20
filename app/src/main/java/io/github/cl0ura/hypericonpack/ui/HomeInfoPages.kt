@@ -72,7 +72,7 @@ internal fun ModuleLogsPage(
         entries = emptyList()
         status = "正在读取日志…"
         val result = withContext(Dispatchers.IO) {
-            if (selectedLogSource == 0) RootAccess.readAppLogs() else RootAccess.readXposedLogs()
+            if (selectedLogSource == 0) RootAccess.readAppLogs(context) else RootAccess.readXposedLogs()
         }
         logs = result.output
         entries = if (result.success) parseModuleLogs(result.output) else emptyList()
@@ -112,7 +112,7 @@ internal fun ModuleLogsPage(
                         )
                         Text(
                             text = if (selectedLogSource == 0) {
-                                "显示应用与后台转换任务的运行记录。Android 日志缓冲区会自动覆盖旧内容。"
+                                "显示应用与后台转换任务的关键记录。日志会持久保存并自动限制大小。"
                             } else {
                                 "显示 LSPosed 注入系统桌面、系统界面和设置等进程时记录的模块日志。"
                             },
