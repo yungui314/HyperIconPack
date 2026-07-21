@@ -16,6 +16,7 @@ import android.os.Build
 import android.util.Log
 import io.github.cl0ura.hypericonpack.config.IconPackConfig
 import io.github.cl0ura.hypericonpack.iconpack.ParsedIconPack
+import io.github.cl0ura.hypericonpack.ui.RootAccess
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -62,9 +63,10 @@ internal object HyperOsIconArchiveConverter {
      * Global Monet, an application's API 33+ native monochrome layer is used
      * only when the selected icon pack has no usable mapping for that app.
      */
-    private const val CURRENT_FORMAT_VERSION = 25
+    private const val CURRENT_FORMAT_VERSION = 28
     private const val TARGET_DENSITY_DIRECTORY = "res/drawable-xxhdpi"
     private const val METADATA_ENTRY = "META-INF/hypericonpack-conversion.properties"
+    private const val TRANSFORM_CONFIG_ENTRY = "transform_config.xml"
     private const val DEFAULT_RENDERING = "original"
     private const val GLOBAL_MONET_RENDERING = "global_monet_v18"
     private const val GLOBAL_MONET_RENDERING_PREFIX = "global_monet_v"
@@ -320,6 +322,7 @@ internal object HyperOsIconArchiveConverter {
                     monetForegroundColor = monetForegroundColor,
                     applicationScopeFingerprint = scopeFingerprint,
                 )
+                writeTransformConfig(zip, useDynamicIcon = false)
                 fun renderDrawable(
                     drawable: Drawable,
                     nativeMonochrome: NativeMonochromeSource? = null,
@@ -686,12 +689,24 @@ internal object HyperOsIconArchiveConverter {
             throw throwable
         }
 
-        val dynamicArchive = generateDynamicCalendarArchive(
+        val generatedDynamicArchive = generateDynamicCalendarArchive(
             pack = pack,
             installedPackageNames = installedPackageNames,
+            launchableActivities = fallbackActivities,
             iconArchive = archive,
             globalMonetPalette = globalMonetPalette,
+            fallbackScaleMultiplier = fallbackScaleMultiplier,
         )
+        // HyperOS checks layer_animating_icons before classic animating_icons
+        // whenever UseDynamicIcon=true.  The stock theme already contains
+        // adaptive calendar trees, which forces square backgrounds even when a
+        // pack PNG is circular.  Embed only the classic MAML tree into the main
+        // icons archive and keep dynamicicons disabled; this makes the normal
+        // IconCustomizer lookup select our dated PNGs without an adaptive mask.
+        if (generatedDynamicArchive?.isFile == true) {
+            embedClassicDynamicArchive(archive, generatedDynamicArchive)
+            generatedDynamicArchive.delete()
+        }
         val result = Result(
             archive = archive,
             requestedExplicitMappings = mappings.size,
@@ -702,7 +717,7 @@ internal object HyperOsIconArchiveConverter {
             nativeMonochromeIcons = nativeMonochromeIcons,
             skippedMappings = skipped,
             archiveSha256 = sha256(archive),
-            dynamicArchive = dynamicArchive,
+            dynamicArchive = null,
         )
         if (monetCompatibilityRenders > 0 || monetEmergencyFallbacks > 0) {
             Log.w(
@@ -950,8 +965,13 @@ internal object HyperOsIconArchiveConverter {
                         monetForegroundColor = monetForegroundColor,
                         applicationScopeFingerprint = scopeFingerprint,
                     )
+                    writeTransformConfig(output, useDynamicIcon = false)
                     input.entries().asSequence().forEach { entry ->
-                        if (entry.name == METADATA_ENTRY || entry.name in replacementEntries) return@forEach
+                        if (
+                            entry.name == METADATA_ENTRY ||
+                            entry.name == TRANSFORM_CONFIG_ENTRY ||
+                            entry.name in replacementEntries
+                        ) return@forEach
                         output.putNextEntry(ZipEntry(entry.name))
                         try {
                             if (!entry.isDirectory) input.getInputStream(entry).use { it.copyTo(output) }
@@ -982,13 +1002,12 @@ internal object HyperOsIconArchiveConverter {
             if (!temporary.renameTo(destination)) {
                 throw IllegalStateException("无法提交增量主题归档")
             }
-            val baseDynamic = dynamicArchiveFor(baseArchive)
             val destinationDynamic = dynamicArchiveFor(destination)
-            if (baseDynamic.isFile) {
-                baseDynamic.copyTo(destinationDynamic, overwrite = true)
-            } else {
-                destinationDynamic.delete()
-            }
+            // Dynamic calendar trees are embedded in the primary icons ZIP.
+            // Never carry a legacy sidecar forward: the installer deliberately
+            // keeps /data/system/theme/dynamicicons out of the active lookup
+            // path so Xiaomi's stock Adaptive tree cannot override pack shape.
+            destinationDynamic.delete()
             return destination
         } catch (throwable: Throwable) {
             temporary.delete()
@@ -1100,6 +1119,102 @@ internal object HyperOsIconArchiveConverter {
         "${iconArchive.nameWithoutExtension}$DYNAMIC_ARCHIVE_SUFFIX",
     )
 
+    /**
+     * Copies only classic MAML entries into the main icons ZIP.  Keeping these
+     * entries in the primary archive is intentional: when UseDynamicIcon is
+     * disabled, ThemeResourcesSystem never consults the stock dynamicicons
+     * archive and IconCustomizer resolves our alpha-preserving classic tree.
+     */
+    private fun embedClassicDynamicArchive(iconArchive: File, dynamicArchive: File) {
+        val temporary = File(iconArchive.parentFile, "${iconArchive.name}.embed-dynamic.new")
+        ZipFile(iconArchive).use { icons ->
+            ZipFile(dynamicArchive).use { dynamic ->
+                ZipOutputStream(BufferedOutputStream(FileOutputStream(temporary))).use { output ->
+                    output.setLevel(Deflater.NO_COMPRESSION)
+                    writeTransformConfig(output, useDynamicIcon = false)
+                    val written = HashSet<String>()
+                    icons.entries().asSequence().forEach { entry ->
+                        if (entry.name == TRANSFORM_CONFIG_ENTRY) return@forEach
+                        if (!written.add(entry.name)) return@forEach
+                        output.putNextEntry(ZipEntry(entry.name))
+                        try {
+                            if (!entry.isDirectory) {
+                                icons.getInputStream(entry).use { it.copyTo(output) }
+                            }
+                        } finally {
+                            output.closeEntry()
+                        }
+                    }
+                    dynamic.entries().asSequence()
+                        .filter { it.name.startsWith("animating_icons/") }
+                        .forEach { entry ->
+                            if (!written.add(entry.name)) return@forEach
+                            output.putNextEntry(ZipEntry(entry.name))
+                            try {
+                                if (!entry.isDirectory) {
+                                    dynamic.getInputStream(entry).use { it.copyTo(output) }
+                                }
+                            } finally {
+                                output.closeEntry()
+                            }
+                        }
+                }
+            }
+        }
+        if (!iconArchive.delete()) {
+            temporary.delete()
+            throw IllegalStateException("无法合并动态图标资源到主题归档")
+        }
+        if (!temporary.renameTo(iconArchive)) {
+            temporary.delete()
+            throw IllegalStateException("无法提交合并后的主题归档")
+        }
+    }
+
+    /** Keeps the archive's dynamic lookup flag aligned with the installer. */
+    fun ensureUseDynamicIconTransformConfig(
+        iconArchive: File,
+        enableDynamicIcons: Boolean,
+    ): File {
+        ZipFile(iconArchive).use { zip ->
+            val existing = zip.getEntry(TRANSFORM_CONFIG_ENTRY)
+            if (existing != null) {
+                val content = zip.getInputStream(existing).use { it.readBytes().toString(Charsets.UTF_8) }
+                val expected = enableDynamicIcons.toString()
+                if (content.contains("name=\"UseDynamicIcon\" value=\"$expected\"")) {
+                    return iconArchive
+                }
+            }
+        }
+        val temporary = File(iconArchive.parentFile, "${iconArchive.name}.dynamic-config.new")
+        ZipFile(iconArchive).use { input ->
+            ZipOutputStream(BufferedOutputStream(FileOutputStream(temporary))).use { output ->
+                output.setLevel(Deflater.NO_COMPRESSION)
+                writeTransformConfig(output, useDynamicIcon = enableDynamicIcons)
+                input.entries().asSequence().forEach { entry ->
+                    if (entry.name == TRANSFORM_CONFIG_ENTRY) return@forEach
+                    output.putNextEntry(ZipEntry(entry.name))
+                    try {
+                        if (!entry.isDirectory) {
+                            input.getInputStream(entry).use { stream -> stream.copyTo(output) }
+                        }
+                    } finally {
+                        output.closeEntry()
+                    }
+                }
+            }
+        }
+        if (!iconArchive.delete()) {
+            temporary.delete()
+            throw IllegalStateException("无法更新主题归档的动态图标配置")
+        }
+        if (!temporary.renameTo(iconArchive)) {
+            temporary.delete()
+            throw IllegalStateException("无法提交主题归档的动态图标配置")
+        }
+        return iconArchive
+    }
+
     private fun readArchiveInfo(archive: File): ExistingArchiveInfo? {
         return runCatching {
             ZipFile(archive).use { zip ->
@@ -1176,7 +1291,9 @@ internal object HyperOsIconArchiveConverter {
         val root = context.getExternalFilesDir(ARCHIVE_DIRECTORY)
             ?: throw IllegalStateException("外部应用文件目录不可用，无法创建待应用的主题归档")
         val directory = File(root, ARCHIVE_CACHE_DIRECTORY)
-        if (createDirectory && !directory.exists() && !directory.mkdirs()) {
+        if (createDirectory) {
+            ensureArchiveDirectoryWritable(directory)
+        } else if (!directory.exists() && !directory.mkdirs()) {
             throw IllegalStateException("无法创建主题归档目录：${directory.absolutePath}")
         }
         // Preserve the pre-Monet identity for the ordinary converter path so
@@ -1212,11 +1329,73 @@ internal object HyperOsIconArchiveConverter {
             .take(SCOPE_FINGERPRINT_LENGTH)
     }
 
+
+    /**
+     * External archive storage lives under Android/data.  After uninstall/
+     * reinstall the directory tree can remain owned by the previous app uid
+     * (and an older multi-category SELinux context).  Future writes then fail
+     * with EACCES even though getExternalFilesDir() returns a path.  Reclaim
+     * ownership once when we cannot write.
+     */
+    private fun ensureArchiveDirectoryWritable(directory: File) {
+        if (directory.exists() || directory.mkdirs()) {
+            val probe = File(directory, ".write-probe")
+            val writable = runCatching {
+                probe.outputStream().use { it.write(0) }
+                probe.delete()
+                true
+            }.getOrDefault(false)
+            if (writable) return
+        }
+
+        val path = directory.absolutePath.replace("'", "'\''")
+        val result = RootAccess.runFixed(
+            command = """
+                set -e
+                path='$path'
+                app_uid="${'$'}(stat -c %u /data/user/0/io.github.cl0ura.hypericonpack 2>/dev/null || true)"
+                [ -n "${'$'}app_uid" ]
+                mkdir -p "${'$'}path"
+                # Keep the media group for FUSE visibility, but the owner must
+                # match the currently installed app uid.
+                chown -R "${'$'}app_uid:ext_data_rw" "${'$'}(dirname "${'$'}(dirname "${'$'}path")")" 2>/dev/null || true
+                chown -R "${'$'}app_uid:ext_data_rw" "${'$'}path"
+                find "${'$'}path" -type d -exec chmod 2770 {} +
+                find "${'$'}path" -type f -exec chmod 660 {} +
+                chcon -R u:object_r:media_rw_data_file:s0 "${'$'}path" 2>/dev/null || true
+                touch "${'$'}path/.write-probe"
+                chown "${'$'}app_uid:ext_data_rw" "${'$'}path/.write-probe"
+                chmod 660 "${'$'}path/.write-probe"
+                rm -f "${'$'}path/.write-probe"
+                echo 'HYPER_ICONPACK_ARCHIVE_DIR_OK'
+            """.trimIndent(),
+            timeoutSeconds = 20L,
+        )
+        if (!result.success || !result.output.contains("HYPER_ICONPACK_ARCHIVE_DIR_OK")) {
+            throw IllegalStateException(
+                "主题归档目录不可写：${directory.absolutePath}. ${result.output}".trim(),
+            )
+        }
+        if (!directory.exists() && !directory.mkdirs()) {
+            throw IllegalStateException("无法创建主题归档目录：${directory.absolutePath}")
+        }
+        val probe = File(directory, ".write-probe")
+        runCatching {
+            probe.outputStream().use { it.write(0) }
+            probe.delete()
+        }.getOrElse {
+            throw IllegalStateException(
+                "主题归档目录仍不可写：${directory.absolutePath}",
+                it,
+            )
+        }
+    }
+
     private fun archiveDirectory(context: Context, createDirectory: Boolean): File? {
         val root = context.getExternalFilesDir(ARCHIVE_DIRECTORY) ?: return null
         val directory = File(root, ARCHIVE_CACHE_DIRECTORY)
-        if (createDirectory && !directory.exists() && !directory.mkdirs()) {
-            throw IllegalStateException("无法创建主题归档目录：${directory.absolutePath}")
+        if (createDirectory) {
+            ensureArchiveDirectoryWritable(directory)
         }
         return directory.takeIf { it.exists() || createDirectory }
     }
@@ -1435,60 +1614,99 @@ internal object HyperOsIconArchiveConverter {
     private fun generateDynamicCalendarArchive(
         pack: ParsedIconPack?,
         installedPackageNames: Set<String>,
+        launchableActivities: List<ActivityInfo>,
         iconArchive: File,
         globalMonetPalette: GlobalMonetPalette?,
+        fallbackScaleMultiplier: Float,
     ): File? {
         val resolvedPack = pack ?: return null
-        val mappings = resolvedPack.calendarMappings()
-            .asSequence()
+        // HyperOS resolves dynamic icons through IconCustomizer.getIconNames():
+        // activity class first (e.g. com.android.calendar.homepage.AllInOneActivity),
+        // then package fallback. Emitting only the package root makes the desktop
+        // miss the pack's dynamic tree and fall back to the stock square MAML icon.
+        val installedMappings = resolvedPack.calendarMappings()
             .filter { it.component.packageName in installedPackageNames }
-            .distinctBy { it.component.packageName }
-            .toList()
-        val destination = dynamicArchiveFor(iconArchive)
-        if (mappings.isEmpty()) {
-            destination.delete()
+        if (installedMappings.isEmpty()) {
+            dynamicArchiveFor(iconArchive).delete()
             return null
         }
+        val launchableByPackage = launchableActivities
+            .mapNotNull { info -> componentName(info) }
+            .groupBy({ it.packageName }, { it })
+        val destination = dynamicArchiveFor(iconArchive)
         val temporary = File(destination.parentFile, "${destination.name}.new")
-        var convertedPackages = 0
+        var convertedTrees = 0
         try {
             ZipOutputStream(BufferedOutputStream(FileOutputStream(temporary))).use { zip ->
                 zip.setLevel(Deflater.NO_COMPRESSION)
-                mappings.forEach { mapping ->
-                    val renderedDays = (1..31).map { day ->
-                        val drawable = resolvedPack.loadCalendarDrawable(mapping.drawablePrefix, day)
-                            ?: return@map null
-                        ByteArrayOutputStream().use { output ->
-                            val rendered = runCatching {
-                                if (globalMonetPalette == null) {
-                                    renderDrawableAsPng(drawable, output, DYNAMIC_ICON_SIZE_PX)
-                                } else {
-                                    GlobalMonetIconRenderer.render(
-                                        drawable = drawable,
-                                        palette = globalMonetPalette,
-                                        size = DYNAMIC_ICON_SIZE_PX,
-                                        output = output,
-                                    )
-                                }
-                            }.isSuccess
-                            output.toByteArray().takeIf { rendered && it.isNotEmpty() }
+                val renderedByPrefix = HashMap<String, List<ByteArray>>()
+                val writtenRoots = HashSet<String>()
+                installedMappings
+                    .groupBy { it.component.packageName to it.drawablePrefix }
+                    .forEach { (packageAndPrefix, mappings) ->
+                        val (packageName, drawablePrefix) = packageAndPrefix
+                        val renderedDays = renderedByPrefix.getOrPut(drawablePrefix) {
+                            val frames = (1..31).map { day ->
+                                val drawable = resolvedPack.loadCalendarDrawable(
+                                    drawablePrefix = drawablePrefix,
+                                    dayOfMonth = day,
+                                    scaleMultiplier = fallbackScaleMultiplier,
+                                ) ?: return@map null
+                                // Reuse the exact static Monet/original pipeline so
+                                // dynamic calendar frames keep the same shape and palette.
+                                renderIncrementalPng(
+                                    drawable = drawable,
+                                    palette = globalMonetPalette,
+                                    nativeMonochrome = null,
+                                )
+                            }
+                            if (frames.any { it == null }) {
+                                emptyList()
+                            } else {
+                                frames.filterNotNull()
+                            }
+                        }
+                        if (renderedDays.size != 31) return@forEach
+                        val relativeNames = LinkedHashSet<String>()
+                        relativeNames += packageName
+                        mappings.forEach { mapping ->
+                            relativeNames += dynamicIconLookupName(
+                                packageName = mapping.component.packageName,
+                                className = mapping.component.className,
+                            )
+                        }
+                        launchableByPackage[packageName].orEmpty().forEach { component ->
+                            relativeNames += dynamicIconLookupName(
+                                packageName = component.packageName,
+                                className = component.className,
+                            )
+                        }
+                        val currentDay = Calendar.getInstance()
+                            .get(Calendar.DAY_OF_MONTH)
+                            .coerceIn(1, 31)
+                        val quiet = renderedDays[currentDay - 1]
+                        val manifest = dynamicCalendarManifest()
+                        relativeNames.forEach { relativeName ->
+                            if (!writtenRoots.add(relativeName)) return@forEach
+                            // Keep the finished PNGs on the classic path.  They
+                            // retain the icon pack's own alpha shape, while the
+                            // main icons archive (rather than dynamicicons) makes
+                            // this path win over the stock Adaptive resources.
+                            val packageRoot = "animating_icons/$relativeName"
+                            appendZipText(zip, "$packageRoot/fancy/manifest.xml", manifest)
+                            renderedDays.forEachIndexed { index, bytes ->
+                                appendZipBytes(
+                                    zip,
+                                    "$packageRoot/fancy/day_${index + 1}.png",
+                                    bytes,
+                                )
+                            }
+                            appendZipBytes(zip, "$packageRoot/quiet/quietImage.png", quiet)
+                            convertedTrees++
                         }
                     }
-                    if (renderedDays.any { it == null }) return@forEach
-                    val packageRoot = "layer_animating_icons/${mapping.component.packageName}"
-                    appendZipText(zip, "$packageRoot/config.xml", dynamicCalendarConfig())
-                    appendZipText(zip, "$packageRoot/0/fancy/manifest.xml", dynamicCalendarManifest())
-                    renderedDays.forEachIndexed { index, bytes ->
-                        appendZipBytes(zip, "$packageRoot/0/fancy/day_${index + 1}.png", bytes!!)
-                    }
-                    val currentDay = Calendar.getInstance().get(Calendar.DAY_OF_MONTH).coerceIn(1, 31)
-                    val quiet = renderedDays[currentDay - 1]!!
-                    appendZipBytes(zip, "$packageRoot/0/quiet/quietImage.png", quiet)
-                    appendZipBytes(zip, "$packageRoot/quiet/quietImage.png", quiet)
-                    convertedPackages++
-                }
             }
-            if (convertedPackages == 0) {
+            if (convertedTrees == 0) {
                 temporary.delete()
                 destination.delete()
                 return null
@@ -1508,6 +1726,19 @@ internal object HyperOsIconArchiveConverter {
         } catch (throwable: Throwable) {
             temporary.delete()
             throw throwable
+        }
+    }
+
+    /**
+     * Mirrors IconCustomizer.getFileName()/getIconNames() so dynamic trees are
+     * discoverable for both package-level and activity-level lookups.
+     */
+    private fun dynamicIconLookupName(packageName: String, className: String?): String {
+        val resolvedClass = className?.takeIf { it.isNotBlank() } ?: return packageName
+        return if (resolvedClass.startsWith(packageName)) {
+            resolvedClass
+        } else {
+            "$packageName#$resolvedClass"
         }
     }
 
@@ -1624,6 +1855,31 @@ internal object HyperOsIconArchiveConverter {
         }
     }.getOrNull()
 
+    /**
+     * HyperOS only consults /data/system/theme/dynamicicons when the icons
+     * archive declares UseDynamicIcon=true. Without this entry, calendar MAML
+     * resources are installed but never loaded by IconCustomizer.
+     */
+    private fun writeTransformConfig(zip: ZipOutputStream, useDynamicIcon: Boolean) {
+        // Classic MAML entries embedded in the main icons archive must keep
+        // UseDynamicIcon=false; otherwise the stock dynamicicons layer is
+        // consulted first and AdaptiveIconDrawable re-masks pack shapes.
+        val config = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <IconTransform>
+                <Config name="SupportLayerIcon" value="true" />
+                <Config name="UseDynamicIcon" value="$useDynamicIcon" />
+                <Config name="ConfigIconMask" value="M0 0H100V100H0Z" />
+            </IconTransform>
+        """.trimIndent()
+        zip.putNextEntry(ZipEntry(TRANSFORM_CONFIG_ENTRY))
+        try {
+            zip.write(config.toByteArray(Charsets.UTF_8))
+        } finally {
+            zip.closeEntry()
+        }
+    }
+
     private fun writeArchiveMetadata(
         zip: ZipOutputStream,
         iconPackPackage: String,
@@ -1662,6 +1918,9 @@ internal object HyperOsIconArchiveConverter {
                 .count { entry -> !entry.isDirectory && entry.name.startsWith("$TARGET_DENSITY_DIRECTORY/") && entry.name.endsWith(".png") }
             require(iconEntries == expectedIconEntries) {
                 "主题归档校验失败：期望 $expectedIconEntries 个图标，实际 $iconEntries 个"
+            }
+            require(zip.getEntry(TRANSFORM_CONFIG_ENTRY) != null) {
+                "主题归档校验失败：缺少 $TRANSFORM_CONFIG_ENTRY"
             }
         }
     }

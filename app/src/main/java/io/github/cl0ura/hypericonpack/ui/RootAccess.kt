@@ -33,14 +33,11 @@ internal object RootAccess {
     fun restartSystemUi(): Result = runFixed("pkill -f com.android.systemui")
 
     /**
-     * Reloads long-lived icon consumers exactly once after a user applies or
-     * restores an archive. Launcher and SystemUI are allowed to restart
-     * immediately. Personal Assistant owns HyperOS' widget picker and keeps a
-     * separate app-icon cache, so it is stopped and left to restart lazily the
-     * next time the picker or one of its widgets is opened.
+     * Reloads icon caches after applying or restoring the Root-managed runtime
+     * archive by replaying Theme Manager's THEME_FLAG_ICON = 0x8 path.
      */
-    fun restartIconSurfaces(): Result = runFixed(
-        command = RESTART_ICON_SURFACES_COMMAND,
+    fun refreshIconSurfaces(): Result = runFixed(
+        command = IconSurfaceRefreshCommand.command,
         timeoutSeconds = 20L,
     )
 
@@ -134,45 +131,4 @@ internal object RootAccess {
         }
     }
 
-    private val RESTART_ICON_SURFACES_COMMAND = """
-        old_launcher="${'$'}(pidof com.miui.home 2>/dev/null || true)"
-        old_systemui="${'$'}(pidof com.android.systemui 2>/dev/null || true)"
-        old_widget_picker="${'$'}(pidof com.miui.personalassistant 2>/dev/null || true)"
-
-        for process_id in ${'$'}old_launcher; do kill -TERM "${'$'}process_id" 2>/dev/null || true; done
-        for process_id in ${'$'}old_systemui; do kill -TERM "${'$'}process_id" 2>/dev/null || true; done
-        for process_id in ${'$'}old_widget_picker; do kill -TERM "${'$'}process_id" 2>/dev/null || true; done
-
-        wait_for_restart() {
-          package_name="${'$'}1"
-          old_processes="${'$'}2"
-          attempt=0
-          while [ "${'$'}attempt" -lt 40 ]; do
-            current_processes="${'$'}(pidof "${'$'}package_name" 2>/dev/null || true)"
-            if [ -n "${'$'}current_processes" ] && [ "${'$'}current_processes" != "${'$'}old_processes" ]; then
-              echo "${'$'}package_name restarted: ${'$'}current_processes"
-              return 0
-            fi
-            sleep 0.25
-            attempt=${'$'}((attempt + 1))
-          done
-          return 1
-        }
-
-        launcher_result=0
-        systemui_result=0
-        wait_for_restart com.miui.home "${'$'}old_launcher" || launcher_result=${'$'}?
-        wait_for_restart com.android.systemui "${'$'}old_systemui" || systemui_result=${'$'}?
-
-        if [ "${'$'}launcher_result" -ne 0 ]; then
-          cmd activity start-activity -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null 2>&1 || true
-          sleep 1
-          [ -n "${'$'}(pidof com.miui.home 2>/dev/null || true)" ] || exit 74
-        fi
-        [ "${'$'}systemui_result" -eq 0 ] || exit 75
-        if [ -n "${'$'}old_widget_picker" ]; then
-          echo "com.miui.personalassistant stopped for lazy restart: ${'$'}old_widget_picker"
-        fi
-        echo 'HYPER_ICONPACK_SURFACES_RESTARTED'
-    """.trimIndent()
 }

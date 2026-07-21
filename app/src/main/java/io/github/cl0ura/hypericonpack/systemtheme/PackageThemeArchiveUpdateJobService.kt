@@ -8,6 +8,7 @@ import android.content.ComponentName
 import android.content.Context
 import io.github.cl0ura.hypericonpack.config.IconSettingsStore
 import io.github.cl0ura.hypericonpack.logging.AppLog
+import io.github.cl0ura.hypericonpack.ui.RootAccess
 
 /** Schedules durable, process-safe updates after an app is installed. */
 internal object PackageThemeArchiveUpdateScheduler {
@@ -19,9 +20,8 @@ internal object PackageThemeArchiveUpdateScheduler {
             JOB_ID,
             ComponentName(context, PackageThemeArchiveUpdateJobService::class.java),
         )
-            // The live ZIP-miss bridge gives the visual result immediately.
-            // This job is the durable follow-up and is allowed to coalesce a
-            // burst of installs into one sequence of small updates.
+            // Coalesce a burst of installs into one archive update and one
+            // native HyperOS THEME_FLAG_ICON configuration refresh.
             .setMinimumLatency(0L)
             .setOverrideDeadline(3_000L)
             .build()
@@ -64,6 +64,22 @@ private object PackageThemeArchiveUpdateWorker {
         if (!config.systemThemeActive || config.packageName == null) {
             pending.forEach(settings::markThemeArchivePackageUpdateComplete)
             return false
+        }
+        val themeStatus = RootThemeIconInstaller.status()
+        if (ManagedThemeStateReconciler.shouldClearManagedThemeState(config.systemThemeActive, themeStatus)) {
+            settings.markManagedThemeInactive()
+            PackageThemeArchiveUpdateScheduler.log(
+                context,
+                "PACKAGE_UPDATE batch canceled: managed theme is no longer active (${themeStatus.output})",
+            )
+            return false
+        }
+        if (!themeStatus.success) {
+            PackageThemeArchiveUpdateScheduler.log(
+                context,
+                "PACKAGE_UPDATE batch deferred: unable to verify active managed theme (${themeStatus.output})",
+            )
+            return true
         }
         pending.filter { it == config.packageName }.forEach(settings::markThemeArchivePackageUpdateComplete)
         val targetPackages = pending.filter { it != config.packageName }
@@ -113,15 +129,21 @@ private object PackageThemeArchiveUpdateWorker {
                 )
                 true
             } else {
+                val refresh = RootAccess.refreshIconSurfaces()
+                if (!refresh.success) {
+                    PackageThemeArchiveUpdateScheduler.log(
+                        context,
+                        "PACKAGE_UPDATE batch refresh failed: ${refresh.output}",
+                    )
+                    return true
+                }
                 settings.writeActiveArchive(updated)
                 targetPackages.forEach(settings::markThemeArchivePackageUpdateComplete)
-                // This revision only invalidates the module's small in-memory
-                // icon caches. It no longer emits a theme broadcast or reloads
-                // Launcher/SystemUI.
                 settings.touch()
                 PackageThemeArchiveUpdateScheduler.log(
                     context,
-                    "PACKAGE_UPDATE batch persisted ${targetPackages.size} packages into ${updated.name}",
+                    "PACKAGE_UPDATE batch persisted and refreshed ${targetPackages.size} packages " +
+                        "into ${updated.name}",
                 )
                 settings.pendingThemeArchivePackageUpdates().isNotEmpty()
             }

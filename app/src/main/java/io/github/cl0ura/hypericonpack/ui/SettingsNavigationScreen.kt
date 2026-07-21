@@ -200,7 +200,7 @@ private fun SettingsOverviewPage(
             val result = withContext(Dispatchers.IO) { RootThemeIconInstaller.restore() }
             restoreSummary = if (result.success) {
                 settingsStore.writeActiveArchive(null)
-                val refresh = withContext(Dispatchers.IO) { RootAccess.restartIconSurfaces() }
+                val refresh = withContext(Dispatchers.IO) { RootAccess.refreshIconSurfaces() }
                 settingsStore.write(
                     settingsStore.read().copy(
                         packageName = null,
@@ -210,7 +210,7 @@ private fun SettingsOverviewPage(
                 )
                 AppLog.info(
                     context,
-                    "Restored system icons; surfacesRestarted=${refresh.success}; ${refresh.output}",
+                    "Restored system icons; surfacesRefreshed=${refresh.success}; ${refresh.output}",
                 )
                 if (refresh.success) {
                     "已恢复系统原本图标，桌面与系统界面已刷新"
@@ -489,6 +489,10 @@ private fun ConvertedArchivesPage(
 
     fun applyArchive(archive: HyperOsIconArchiveConverter.ExistingArchiveInfo) {
         if (activeActionPath != null) return
+        if (!archive.isCurrentFormat) {
+            actionSummary = "该存档使用旧版主题资源格式，请在“制作图标包”中重新转换。"
+            return
+        }
         val sourcePackage = archive.iconPackPackage ?: run {
             actionSummary = "此存档缺少来源信息，无法应用。"
             return
@@ -498,35 +502,37 @@ private fun ConvertedArchivesPage(
             actionSummary = "正在应用图标主题…"
             val result = withContext(Dispatchers.IO) { RootThemeIconInstaller.install(archive.archive) }
             actionSummary = if (result.success) {
-                settingsStore.writeActiveArchive(archive.archive)
-                val refresh = withContext(Dispatchers.IO) { RootAccess.restartIconSurfaces() }
-                settingsStore.write(
-                    settingsStore.read().copy(
-                        packageName = sourcePackage,
-                        fallbackScaleMultiplier = archive.fallbackScaleMultiplier ?: settingsStore.read().fallbackScaleMultiplier,
-                        globalMonetIcons = archive.globalMonetIcons,
-                        monetCustomColors = archive.monetCustomColors,
-                        monetBackgroundColor = archive.monetBackgroundColor,
-                        monetForegroundColor = archive.monetForegroundColor,
-                        conversionAllApplications = true,
-                        systemThemeActive = true,
-                        systemThemeAnimationBridge = true,
-                    ),
-                )
-                if (settingsStore.pendingThemeArchivePackageUpdates().isNotEmpty()) {
-                    PackageThemeArchiveUpdateScheduler.schedule(context)
-                }
+                val refresh = withContext(Dispatchers.IO) { RootAccess.refreshIconSurfaces() }
                 val sourceName = sourceLabels[sourcePackage]
                     ?: HyperOsIconArchiveConverter.sourceLabel(sourcePackage)
                 AppLog.info(
                     context,
                     "Applied archive ${archive.archive.name} from $sourceName; " +
-                        "surfacesRestarted=${refresh.success}; ${refresh.output}",
+                        "surfacesRefreshed=${refresh.success}; ${refresh.output}",
                 )
                 if (refresh.success) {
+                    val current = settingsStore.read()
+                    settingsStore.writeActiveArchive(archive.archive)
+                    settingsStore.write(
+                        current.copy(
+                            packageName = sourcePackage,
+                            fallbackScaleMultiplier = archive.fallbackScaleMultiplier
+                                ?: current.fallbackScaleMultiplier,
+                            globalMonetIcons = archive.globalMonetIcons,
+                            monetCustomColors = archive.monetCustomColors,
+                            monetBackgroundColor = archive.monetBackgroundColor,
+                            monetForegroundColor = archive.monetForegroundColor,
+                            conversionAllApplications = true,
+                            systemThemeActive = true,
+                            systemThemeAnimationBridge = false,
+                        ),
+                    )
+                    if (settingsStore.pendingThemeArchivePackageUpdates().isNotEmpty()) {
+                        PackageThemeArchiveUpdateScheduler.schedule(context)
+                    }
                     "已应用 $sourceName，桌面与系统界面已刷新"
                 } else {
-                    "已应用 $sourceName；界面刷新未完成，建议重启设备"
+                    "主题文件已写入，但系统界面刷新失败；请再次点击此存档重试"
                 }
             } else {
                 AppLog.warning(context, "Archive apply failed: ${archive.archive.name}; ${result.output}")
@@ -647,8 +653,17 @@ private fun ConvertedArchiveCard(
             ) {
                 TextButton(text = "删除", onClick = onDelete, enabled = !busy)
                 Spacer(Modifier.width(8.dp))
-                Button(onClick = onApply, enabled = !busy && archive.iconPackPackage != null) {
-                    Text(if (busy) "处理中" else "使用")
+                Button(
+                    onClick = onApply,
+                    enabled = !busy && archive.iconPackPackage != null && archive.isCurrentFormat,
+                ) {
+                    Text(
+                        when {
+                            !archive.isCurrentFormat -> "请重新转换"
+                            busy -> "处理中"
+                            else -> "使用"
+                        },
+                    )
                 }
             }
         }

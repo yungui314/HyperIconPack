@@ -32,6 +32,34 @@ object XposedServiceBridge : XposedServiceHelper.OnServiceListener {
                 error != null -> "连接失败"
                 else -> "未连接"
             }
+
+        /** Whether LSPosed has granted the synthetic system_server scope. */
+        val systemScopeGranted: Boolean
+            get() = scope.any { it == "system" || it == "android" }
+
+        /** Whether the module is currently loaded into system_server. */
+        val systemTargetRunning: Boolean
+            get() = targets.any { target ->
+                val process = target.processName
+                process == "system" || process == "system_server" || process == "android"
+            }
+
+        /**
+         * DRM bypass only works when the module is live inside system_server.
+         * Scope alone is not enough before the first reboot / after a failed
+         * hot reload.
+         */
+        val drmProtectionReady: Boolean
+            get() = api102Ready && systemScopeGranted && systemTargetRunning
+
+        val drmProtectionLabel: String
+            get() = when {
+                !connected -> "未连接"
+                !api102Ready -> "API 不兼容"
+                !systemScopeGranted -> "缺少 system 作用域"
+                !systemTargetRunning -> "需重启生效"
+                else -> "已保护"
+            }
     }
 
     private val initialized = AtomicBoolean(false)
@@ -64,6 +92,24 @@ object XposedServiceBridge : XposedServiceHelper.OnServiceListener {
     override fun onServiceBind(service: XposedService) {
         this.service = service
         var current = readState(service)
+        val missingScope = STATIC_SCOPE - current.scope
+        if (missingScope.isNotEmpty()) {
+            runCatching { service.requestScope(missingScope.sorted(), SCOPE_LISTENER) }
+                .onSuccess {
+                    appContext?.let { context ->
+                        AppLog.info(context, "Requested Xposed scope: ${missingScope.sorted()}; reboot required")
+                    }
+                }
+                .onFailure { throwable ->
+                    appContext?.let { context ->
+                        AppLog.warning(
+                            context,
+                            "Unable to request Xposed scope ${missingScope.sorted()}: " +
+                                (throwable.message ?: throwable.javaClass.simpleName),
+                        )
+                    }
+                }
+        }
         val obsoleteScope = current.scope - STATIC_SCOPE
         if (obsoleteScope.isNotEmpty()) {
             runCatching { service.removeScope(obsoleteScope.sorted()) }
@@ -151,5 +197,23 @@ object XposedServiceBridge : XposedServiceHelper.OnServiceListener {
         }
     }
 
-    private val STATIC_SCOPE = setOf("com.miui.home")
+    private val STATIC_SCOPE = setOf(
+        "com.miui.home",
+        // LSPosed maps system_server to the synthetic "system" package, not "android".
+        "system",
+    )
+
+    private val SCOPE_LISTENER = object : XposedService.OnScopeEventListener {
+        override fun onScopeRequestApproved(granted: MutableList<String>) {
+            appContext?.let { context ->
+                AppLog.info(context, "Scope request approved: ${granted.sorted()}; reboot required")
+            }
+        }
+
+        override fun onScopeRequestFailed(reason: String) {
+            appContext?.let { context ->
+                AppLog.warning(context, "Scope request failed: $reason")
+            }
+        }
+    }
 }

@@ -92,6 +92,26 @@ class IconSettingsStore(context: Context) {
     }
 
     /**
+     * Called after Root status proves the managed HyperOS theme files are no
+     * longer the ones installed by this app.  Keep the selected icon-pack
+     * settings, but stop treating the theme as active and discard background
+     * incremental work that would otherwise reinstall stale icons.
+     */
+    fun markManagedThemeInactive() {
+        val current = read()
+        if (current.systemThemeActive || current.systemThemeAnimationBridge) {
+            write(
+                current.copy(
+                    systemThemeActive = false,
+                    systemThemeAnimationBridge = false,
+                ),
+            )
+        }
+        writeActiveArchive(null)
+        clearPendingThemeArchivePackageUpdates()
+    }
+
+    /**
      * Persists package updates before scheduling background work.  Android can
      * stop a manifest receiver as soon as `onReceive` returns, so a receiver
      * must not be the sole owner of a multi-second ZIP rewrite.
@@ -125,6 +145,12 @@ class IconSettingsStore(context: Context) {
             if (pending.remove(packageName)) {
                 preferences.edit().putStringSet(KEY_PENDING_ARCHIVE_UPDATES, pending).apply()
             }
+        }
+    }
+
+    fun clearPendingThemeArchivePackageUpdates() {
+        synchronized(PENDING_UPDATE_LOCK) {
+            preferences.edit().remove(KEY_PENDING_ARCHIVE_UPDATES).apply()
         }
     }
 

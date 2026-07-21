@@ -18,7 +18,7 @@
 
 ## 项目简介
 
-Hyper Icon Pack 读取 Nova、ADW、Lawnchair 等通用图标包使用的 `appfilter.xml`，生成 HyperOS 私有 `icons` 主题归档，并通过 Root 安装到系统主题目录。所有应用图标最终都由系统自己的 `IconCustomizer` 读取；Xposed API 102 仅用于适配小米桌面的启动与返回动画，不参与实时图标替换。
+Hyper Icon Pack 读取 Nova、ADW、Lawnchair 等通用图标包使用的 `appfilter.xml`，生成 HyperOS 私有 `icons` 主题归档，并通过 Root 安装到系统主题目录。所有应用图标最终都由 HyperOS 自己的 `ThemeResourcesSystem`、`IconCustomizer` 和桌面原生 Adaptive/LayerAdaptive 链路读取。Xposed API 102 仅用于模块身份、生命周期和热重载兼容，不 Hook Launcher、SystemUI 或 Framework 的图标和动画方法。
 
 ```text
 appfilter.xml / 本机应用图标
@@ -38,7 +38,9 @@ HyperOS 桌面、文件夹、设置与系统界面
 - 转换结果保存为存档，之后切换同一存档无需重新生成。
 - Root 原子安装、完整性校验、自动备份和一键恢复系统原图标。
 - 新安装应用可增量补充进当前主题归档。
-- 支持 HyperOS 动态日历资源；动态时钟仍在研究中。
+- 支持图标包明确声明的 HyperOS 动态日历资源；完整日历帧会复用静态图标的形状、alpha、原色/Monet 渲染，缺少动态资源时回退为静态图标。
+- 使用 HyperOS 官方分层图标资源让启动和返回动画沿用系统原生 Adaptive/LayerAdaptive 链路，兼容圆形、圆角方形、直角方形和异形图标。
+- 动态时钟尚未形成可靠的通用转换方案；没有明确且完整的图标包预设时不会强行生成。
 
 ## 效果展示
 
@@ -71,29 +73,30 @@ HyperOS 桌面、文件夹、设置与系统界面
 
 ## 使用方法
 
-1. 安装 APK，在支持 libxposed API 102 的框架中启用模块。
-2. 作用域只保留系统桌面 `com.miui.home`。设置、SystemUI、手机管家和小组件中心均通过 HyperOS 系统主题资源读取图标，不需要注入。
+1. 安装 APK，在支持 libxposed API 102 的框架中启用模块；静态作用域只保留系统桌面 `com.miui.home`。
+2. 设置、SystemUI、手机管家和小组件中心通过 HyperOS 系统主题资源读取图标，不需要向这些进程注入。
 3. 打开“设置 > 制作图标包”，选择图标来源、适配比例和 Monet 设置。
 4. 点击“转换并保存”，等待图标存档生成。
 5. 在“图标存档”中选择刚生成的存档并应用。
-6. 按页面提示重启桌面或设备，使系统各进程重新读取主题资源。
+6. 应用存档后，模块通过 Root 启动 APK 中的 `ThemeConfigurationCommand`，发送 HyperOS 官方 `themeChangedFlags=0x8` 图标配置刷新，并额外刷新屏幕使用时长小组件；正常情况下不需要杀死或重启 Launcher/SystemUI。
 
 转换会覆盖完整 `appfilter.xml` 映射，并为当前系统已安装的第三方应用、系统应用、禁用应用、无桌面入口应用和 Activity Alias 生成必要的包级资源。未适配内容比例建议从 `85%` 开始，再按图标包风格调整。
 
-## Xposed API 102
+## Xposed / libxposed API 102
 
 - 模块要求支持 [libxposed API 102](https://libxposed.github.io/api/) 的 Xposed 框架。
-- 静态作用域固定为系统桌面 `com.miui.home`，仅处理启动与返回动画兼容；图标替换不依赖实时 Hook。
+- 静态作用域固定为系统桌面 `com.miui.home`，不再 Hook 启动/返回动画，也不依赖实时图标替换 Hook。动画由 HyperOS 官方分层图标链路处理。
 - 模块配置通过 `RemotePreferences` 同步，不再使用旧版跨进程配置方案。
-- `autoHotReload` 用于安装新版 APK 后热重载模块代码，不会重启桌面，也不会替代 HyperOS 主题图标缓存刷新。
-- 应用或切换图标存档后，仍需按应用提示刷新桌面或重启设备，让相关系统进程重新读取 `/data/system/theme/icons`。
-- 从 `v0.9.34` 或更早的旧 API 版本升级时，建议首次升级后重启一次桌面或设备；后续 APK 更新可由 API 102 热重载。
+- `autoHotReload` 用于安装新版 APK 后热重载模块代码，不会重启桌面，也不会替代 HyperOS 官方图标配置刷新。
+- 应用或切换图标存档后，模块会调用官方 `0x8` configuration 刷新；只有设备或主题管理器没有正确响应时，才需要按日志提示手动刷新。
+- 从 `v0.9.36` 或更早版本升级时，旧格式存档需要重新转换；当前归档格式会在元数据中校验，避免直接应用不兼容的旧资源。
 
 ## 实现边界
 
 - 本项目转换的是应用图标，不是包含字体、状态栏信号、电池、Framework 和 MAML 的完整主题商店主题。
 - SystemUI 只能替换有明确应用来源的通知图标；Wi-Fi、信号、电池等系统状态图标无法从 `appfilter.xml` 推导。
-- 动态日历会生成 HyperOS `dynamicicons` 资源；图标包若没有可分离的动态时钟图层，无法可靠生成动态时钟。
+- 动态日历资源会嵌入主 `icons` 归档的 `animating_icons` 路径，并关闭系统默认 `dynamicicons/layer_animating_icons` 覆盖，以保留图标包自己的形状和 Monet 效果。图标包若没有完整的动态日历预设，会回退为静态图标。
+- 动态时钟目前只保留静态图标；图标包若没有经过验证的完整动态时钟预设，不会生成不可靠的系统原生方形时钟。
 - Monet 转换需要从复杂位图中提取前景层级，渐变、半透明和极细线条图标仍可能与源图存在视觉差异。
 
 ## 反馈与贡献

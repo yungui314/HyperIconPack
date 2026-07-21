@@ -27,8 +27,8 @@ android {
         applicationId = "io.github.cl0ura.hypericonpack"
         minSdk = 26
         targetSdk = 36
-        versionCode = 47
-        versionName = "0.9.36"
+        versionCode = 49
+        versionName = "0.9.38"
     }
 
     buildFeatures {
@@ -77,6 +77,8 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-preference:0.9.3")
     implementation("top.yukonga.miuix.kmp:miuix-icons:0.9.3")
     implementation("top.yukonga.miuix.kmp:miuix-blur:0.9.3")
+
+    testImplementation("junit:junit:4.13.2")
 
     // The framework supplies the module API; the service library connects the
     // companion app to API 102 scope, preferences and hot-reload state.

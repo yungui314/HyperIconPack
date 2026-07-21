@@ -3,6 +3,9 @@ package io.github.cl0ura.hypericonpack.iconpack
 import android.content.ComponentName
 import android.content.Context
 import android.content.res.Resources
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Rect
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.util.Xml
@@ -74,10 +77,77 @@ internal class ParsedIconPack private constructor(
         }
     }
 
-    fun loadCalendarDrawable(drawablePrefix: String, dayOfMonth: Int): Drawable? {
+    /**
+     * Calendar packs use two incompatible conventions: some ship a complete
+     * dated icon, while others ship only the date glyph. Complete artwork must
+     * follow the same path as a static mapping; adding iconback/iconupon again
+     * changes its shape and can add an unwanted border. Glyph-only assets are
+     * composed through the pack fallback stack.
+     */
+    fun loadCalendarDrawable(
+        drawablePrefix: String,
+        dayOfMonth: Int,
+        scaleMultiplier: Float = 1f,
+    ): Drawable? {
         require(dayOfMonth in 1..31) { "日历日期必须在 1 到 31 之间" }
-        return loadMappedDrawable("$drawablePrefix$dayOfMonth")
+        val day = loadDrawable("$drawablePrefix$dayOfMonth") ?: return null
+        if (looksLikeFinishedCalendarIcon(day)) {
+            return applyDeclaredShape(day)
+        }
+        val style = fallbackStyle ?: return applyDeclaredShape(day)
+        val mask = style.maskName?.let(::loadDrawable)
+        val background = selectBackground(
+            names = style.backgroundNames,
+            component = ComponentName("calendar", "day$dayOfMonth"),
+        )
+        val foreground = style.foregroundName?.let(::loadDrawable)
+        if (mask == null && background == null && foreground == null) {
+            return applyDeclaredShape(day)
+        }
+        return IconPackFallbackDrawable(
+            source = day,
+            background = background,
+            mask = mask,
+            foreground = foreground,
+            scale = style.scale * scaleMultiplier,
+        )
     }
+
+    private fun looksLikeFinishedCalendarIcon(drawable: Drawable): Boolean = runCatching {
+        val size = CALENDAR_PROBE_SIZE
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val previousBounds = Rect(drawable.bounds)
+        try {
+            drawable.setBounds(0, 0, size, size)
+            drawable.draw(Canvas(bitmap))
+            val pixels = IntArray(size * size)
+            bitmap.getPixels(pixels, 0, size, 0, 0, size, size)
+            var visible = 0
+            var left = size
+            var top = size
+            var right = -1
+            var bottom = -1
+            pixels.forEachIndexed { index, pixel ->
+                if ((pixel ushr 24) < CALENDAR_VISIBLE_ALPHA) return@forEachIndexed
+                visible++
+                val x = index % size
+                val y = index / size
+                if (x < left) left = x
+                if (x > right) right = x
+                if (y < top) top = y
+                if (y > bottom) bottom = y
+            }
+            if (visible == 0) return@runCatching false
+            val coverage = visible.toFloat() / pixels.size
+            val widthRatio = (right - left + 1).toFloat() / size
+            val heightRatio = (bottom - top + 1).toFloat() / size
+            coverage >= CALENDAR_FINISHED_COVERAGE ||
+                (widthRatio >= CALENDAR_FINISHED_SPAN && heightRatio >= CALENDAR_FINISHED_SPAN)
+        } finally {
+            drawable.bounds = previousBounds
+            bitmap.recycle()
+        }
+    }.getOrDefault(false)
 
     /**
      * Loads a mapped drawable with the icon pack's own Resources and theme.
@@ -378,6 +448,10 @@ internal class ParsedIconPack private constructor(
         }
 
         private val IMAGE_ATTRIBUTE = Regex("img\\d+")
+        private const val CALENDAR_PROBE_SIZE = 96
+        private const val CALENDAR_VISIBLE_ALPHA = 24
+        private const val CALENDAR_FINISHED_COVERAGE = 0.25f
+        private const val CALENDAR_FINISHED_SPAN = 0.70f
         private const val MIN_FALLBACK_SCALE = 0.5f
         private const val MAX_FALLBACK_SCALE = 2f
     }

@@ -32,6 +32,7 @@ import io.github.cl0ura.hypericonpack.BuildConfig
 import io.github.cl0ura.hypericonpack.config.IconPackConfig
 import io.github.cl0ura.hypericonpack.config.IconSettingsStore
 import io.github.cl0ura.hypericonpack.systemtheme.HyperOsIconArchiveConverter
+import io.github.cl0ura.hypericonpack.systemtheme.ManagedThemeStateReconciler
 import io.github.cl0ura.hypericonpack.systemtheme.RootThemeIconInstaller
 import io.github.cl0ura.hypericonpack.xposed.XposedServiceBridge
 import kotlinx.coroutines.Dispatchers
@@ -92,13 +93,64 @@ private fun ModuleHomeOverview(
 
     LaunchedEffect(refreshGeneration) {
         snapshot = withContext(Dispatchers.IO) {
-            val config = settingsStore.read()
-            val archive = HyperOsIconArchiveConverter.archiveInfo(settingsStore.readActiveArchive())
-                ?: HyperOsIconArchiveConverter.latestCachedArchiveForSource(
+            var config = settingsStore.read()
+            val root = RootAccess.check()
+            val theme = if (root.success) RootThemeIconInstaller.status() else null
+            if (ManagedThemeStateReconciler.shouldClearManagedThemeState(config.systemThemeActive, theme)) {
+                settingsStore.markManagedThemeInactive()
+                config = settingsStore.read()
+            }
+            val activePath = settingsStore.readActiveArchive()
+            val activeHash = theme?.let(RootThemeIconInstaller::activeArchiveSha256)
+            val verifiedActiveArchive = if (theme?.success == true) {
+                val cachedArchives = HyperOsIconArchiveConverter.cachedArchiveInfos(context)
+                val preferredArchive = HyperOsIconArchiveConverter.archiveInfo(activePath)
+                findMatchingActiveArchive(
+                    activeSha256 = activeHash,
+                    preferred = preferredArchive,
+                    candidates = cachedArchives,
+                    sha256 = { info ->
+                        runCatching { HyperOsIconArchiveConverter.sha256(info.archive) }.getOrNull()
+                    },
+                )?.also { matched ->
+                    if (activePath?.absolutePath != matched.archive.absolutePath) {
+                        settingsStore.writeActiveArchive(matched.archive)
+                    }
+                    // Theme is Root-active; re-sync the local managed flag and
+                    // package name so the home page can show the real source.
+                    val matchedPackage = matched.iconPackPackage
+                    if (
+                        !config.systemThemeActive ||
+                        (matchedPackage != null && config.packageName != matchedPackage)
+                    ) {
+                        settingsStore.write(
+                            config.copy(
+                                packageName = matchedPackage ?: config.packageName,
+                                systemThemeActive = true,
+                                globalMonetIcons = matched.globalMonetIcons,
+                                monetCustomColors = matched.monetCustomColors,
+                                monetBackgroundColor = matched.monetBackgroundColor,
+                                monetForegroundColor = matched.monetForegroundColor,
+                                fallbackScaleMultiplier = matched.fallbackScaleMultiplier
+                                    ?: config.fallbackScaleMultiplier,
+                            ),
+                        )
+                        config = settingsStore.read()
+                    }
+                }
+            } else {
+                null
+            }
+            val archive = verifiedActiveArchive ?: if (theme?.success == true) {
+                // Theme is active but no local cache matched.  Keep the last
+                // selected package label instead of pretending the source is
+                // unknown.
+                null
+            } else {
+                HyperOsIconArchiveConverter.latestCachedArchiveForSource(
                     context = context,
                     iconPackPackage = config.packageName,
-                )
-                ?: HyperOsIconArchiveConverter.existingArchiveInfo(
+                ) ?: HyperOsIconArchiveConverter.existingArchiveInfo(
                     context = context,
                     iconPackPackage = config.packageName,
                     fallbackScaleMultiplier = config.fallbackScaleMultiplier,
@@ -107,8 +159,7 @@ private fun ModuleHomeOverview(
                     monetBackgroundColor = config.monetBackgroundColor,
                     monetForegroundColor = config.monetForegroundColor,
                 )
-            val root = RootAccess.check()
-            val theme = if (root.success) RootThemeIconInstaller.status() else null
+            }
             val sourceName = HyperOsIconArchiveConverter.sourceLabel(
                 context,
                 archive?.iconPackPackage ?: config.packageName,
@@ -133,6 +184,11 @@ private fun ModuleHomeOverview(
                 Card(modifier = Modifier.fillMaxWidth()) {
                     HomeStatusRow("Xposed", xposedState.label, xposedState.api102Ready)
                     HomeStatusRow("Root", snapshot.rootLabel, snapshot.rootReady)
+                    HomeStatusRow(
+                        "DRM 保护",
+                        xposedState.drmProtectionLabel,
+                        xposedState.drmProtectionReady,
+                    )
                     HomeStatusRow("图标来源", snapshot.sourceLabel, snapshot.archiveReady)
                     HomeStatusRow("系统主题", snapshot.themeLabel, snapshot.themeActive)
                     ArrowPreference(
@@ -273,16 +329,24 @@ private data class ModuleStatusSnapshot(
                 append(sourceName)
                 if (it.globalMonetIcons) append(" · Monet")
             }
-        } ?: config.packageName?.takeIf { config.systemThemeActive }?.let {
+        } ?: config.packageName?.let {
+            // Prefer the last selected/applied pack even when the durable cache
+            // cannot be matched by hash (for example after an app reinstall that
+            // temporarily lost archive ownership). Showing "活动来源无法确认" here
+            // is only a last resort for fully unknown active themes.
             buildString {
                 append(sourceName)
                 if (config.globalMonetIcons) append(" · Monet")
             }
-        } ?: "尚未生成"
+        } ?: if (themeActive) {
+            "系统主题已应用"
+        } else {
+            "尚未生成"
+        }
 
     /** An applied source remains meaningful even when its cache key changed. */
     val sourceConfigured: Boolean
-        get() = archive != null || (config.systemThemeActive && config.packageName != null)
+        get() = archive != null || themeActive || (config.systemThemeActive && config.packageName != null)
 
     val themeLabel: String
         get() = when {

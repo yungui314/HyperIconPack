@@ -477,7 +477,7 @@ fun IconPackSettingsScreen(
                                     config = settingsStore.write(
                                         config.copy(
                                             systemThemeActive = true,
-                                            systemThemeAnimationBridge = true,
+                                            systemThemeAnimationBridge = false,
                                         ),
                                     )
                                 },
