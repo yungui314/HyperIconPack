@@ -21,3 +21,7 @@ tmp/
 .DS_Store
 Thumbs.db
 *.log
+
+# Local AI/developer handoff instructions (never publish)
+AGENTS.md
+ui.md

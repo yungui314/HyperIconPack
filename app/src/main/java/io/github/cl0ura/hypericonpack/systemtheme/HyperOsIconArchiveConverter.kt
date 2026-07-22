@@ -63,7 +63,7 @@ internal object HyperOsIconArchiveConverter {
      * Global Monet, an application's API 33+ native monochrome layer is used
      * only when the selected icon pack has no usable mapping for that app.
      */
-    private const val CURRENT_FORMAT_VERSION = 28
+    private const val CURRENT_FORMAT_VERSION = 29
     private const val TARGET_DENSITY_DIRECTORY = "res/drawable-xxhdpi"
     private const val METADATA_ENTRY = "META-INF/hypericonpack-conversion.properties"
     private const val TRANSFORM_CONFIG_ENTRY = "transform_config.xml"
@@ -1181,7 +1181,10 @@ internal object HyperOsIconArchiveConverter {
             if (existing != null) {
                 val content = zip.getInputStream(existing).use { it.readBytes().toString(Charsets.UTF_8) }
                 val expected = enableDynamicIcons.toString()
-                if (content.contains("name=\"UseDynamicIcon\" value=\"$expected\"")) {
+                if (
+                    content.contains("name=\"UseDynamicIcon\" value=\"$expected\"") &&
+                    content.contains("name=\"SupportLayerIcon\" value=\"false\"")
+                ) {
                     return iconArchive
                 }
             }
@@ -1861,13 +1864,18 @@ internal object HyperOsIconArchiveConverter {
      * resources are installed but never loaded by IconCustomizer.
      */
     private fun writeTransformConfig(zip: ZipOutputStream, useDynamicIcon: Boolean) {
+        // LayerAdaptiveIconDrawable treats a transparent adaptive background as
+        // an opaque black canvas on the tested HyperOS 3 launcher. Keep layer
+        // lookup disabled so every surface consumes the same alpha-preserving
+        // main PNG; this also prevents partial fallback to stock adaptive icons
+        // when a theme archive has no complete layer set.
         // Classic MAML entries embedded in the main icons archive must keep
         // UseDynamicIcon=false; otherwise the stock dynamicicons layer is
         // consulted first and AdaptiveIconDrawable re-masks pack shapes.
         val config = """
             <?xml version="1.0" encoding="UTF-8"?>
             <IconTransform>
-                <Config name="SupportLayerIcon" value="true" />
+                <Config name="SupportLayerIcon" value="false" />
                 <Config name="UseDynamicIcon" value="$useDynamicIcon" />
                 <Config name="ConfigIconMask" value="M0 0H100V100H0Z" />
             </IconTransform>

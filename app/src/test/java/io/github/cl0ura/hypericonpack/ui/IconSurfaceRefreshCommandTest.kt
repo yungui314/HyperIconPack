@@ -13,9 +13,11 @@ class IconSurfaceRefreshCommandTest {
         assertTrue(command.contains("app_process"))
         assertTrue(command.contains("HYPER_ICONPACK_THEME_CONFIGURATION_UPDATED"))
         assertTrue(command.contains("miui.intent.action.ACTION_THEME_CHANGED"))
-        assertTrue(command.contains("APPWIDGET_UPDATE"))
-        assertTrue(command.contains("SimpleUsageStatsWidget"))
-        assertTrue(command.contains("NormalUsageStatsWidget"))
+        assertFalse(command.contains("cmd appwidget"))
+        assertFalse(command.contains("dumpsys appwidget"))
+        assertFalse(command.contains("APPWIDGET_UPDATE"))
+        assertFalse(command.contains("SimpleUsageStatsWidget"))
+        assertFalse(command.contains("NormalUsageStatsWidget"))
     }
 
     @Test

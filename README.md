@@ -18,7 +18,7 @@
 
 ## 项目简介
 
-Hyper Icon Pack 读取 Nova、ADW、Lawnchair 等通用图标包使用的 `appfilter.xml`，生成 HyperOS 私有 `icons` 主题归档，并通过 Root 安装到系统主题目录。所有应用图标最终都由 HyperOS 自己的 `ThemeResourcesSystem`、`IconCustomizer` 和桌面原生 Adaptive/LayerAdaptive 链路读取。Xposed API 102 仅用于模块身份、生命周期和热重载兼容，不 Hook Launcher、SystemUI 或 Framework 的图标和动画方法。
+Hyper Icon Pack 读取 Nova、ADW、Lawnchair 等通用图标包使用的 `appfilter.xml`，生成 HyperOS 私有 `icons` 主题归档，并通过 Root 安装到系统主题目录。所有应用图标最终都由 HyperOS 自己的 `ThemeResourcesSystem`、`IconCustomizer` 和系统主题资源链路读取。Xposed API 102 仅用于模块身份、生命周期和热重载兼容，不 Hook Launcher、SystemUI 或 Framework 的图标和动画方法。
 
 ```text
 appfilter.xml / 本机应用图标
@@ -39,8 +39,11 @@ HyperOS 桌面、文件夹、设置与系统界面
 - Root 原子安装、完整性校验、自动备份和一键恢复系统原图标。
 - 新安装应用可增量补充进当前主题归档。
 - 支持图标包明确声明的 HyperOS 动态日历资源；完整日历帧会复用静态图标的形状、alpha、原色/Monet 渲染，缺少动态资源时回退为静态图标。
-- 使用 HyperOS 官方分层图标资源让启动和返回动画沿用系统原生 Adaptive/LayerAdaptive 链路，兼容圆形、圆角方形、直角方形和异形图标。
+- 所有普通图标统一使用保留 alpha 的主题主 PNG，并关闭不可靠的 LayerAdaptive 分层读取；圆形、圆角方形、直角方形和异形图标都由原图透明度决定形状，避免透明背景层被渲染成黑色方框。
 - 动态时钟尚未形成可靠的通用转换方案；没有明确且完整的图标包预设时不会强行生成。
+
+> [!IMPORTANT]
+> `v0.9.39` 修复了透明 Adaptive 背景层在部分 HyperOS 3 桌面上被合成为大黑框的问题。新归档使用 `SupportLayerIcon=false` 和单一主 PNG；升级后请重新转换图标包，不要继续应用旧格式存档。
 
 ## 效果展示
 
@@ -78,18 +81,18 @@ HyperOS 桌面、文件夹、设置与系统界面
 3. 打开“设置 > 制作图标包”，选择图标来源、适配比例和 Monet 设置。
 4. 点击“转换并保存”，等待图标存档生成。
 5. 在“图标存档”中选择刚生成的存档并应用。
-6. 应用存档后，模块通过 Root 启动 APK 中的 `ThemeConfigurationCommand`，发送 HyperOS 官方 `themeChangedFlags=0x8` 图标配置刷新，并额外刷新屏幕使用时长小组件；正常情况下不需要杀死或重启 Launcher/SystemUI。
+6. 应用存档后，模块通过 Root 启动 APK 中的 `ThemeConfigurationCommand`，执行 HyperOS 主题商店同源的 `ThemeResourcesSystem.resetIcons()`、`IconCustomizer.clearCustomizedIcons(null)` 和 `themeChangedFlags=0x8` 刷新，再发送 `ACTION_THEME_CHANGED`。不再单独刷新小组件，也不杀死或重启 Launcher/SystemUI。
 
 转换会覆盖完整 `appfilter.xml` 映射，并为当前系统已安装的第三方应用、系统应用、禁用应用、无桌面入口应用和 Activity Alias 生成必要的包级资源。未适配内容比例建议从 `85%` 开始，再按图标包风格调整。
 
 ## Xposed / libxposed API 102
 
 - 模块要求支持 [libxposed API 102](https://libxposed.github.io/api/) 的 Xposed 框架。
-- 静态作用域固定为系统桌面 `com.miui.home`，不再 Hook 启动/返回动画，也不依赖实时图标替换 Hook。动画由 HyperOS 官方分层图标链路处理。
+- 静态作用域固定为系统桌面 `com.miui.home`，不再 Hook 启动/返回动画，也不依赖实时图标替换 Hook。桌面动画继续由系统基于主题主 PNG 的原生链路处理。
 - 模块配置通过 `RemotePreferences` 同步，不再使用旧版跨进程配置方案。
 - `autoHotReload` 用于安装新版 APK 后热重载模块代码，不会重启桌面，也不会替代 HyperOS 官方图标配置刷新。
 - 应用或切换图标存档后，模块会调用官方 `0x8` configuration 刷新；只有设备或主题管理器没有正确响应时，才需要按日志提示手动刷新。
-- 从 `v0.9.36` 或更早版本升级时，旧格式存档需要重新转换；当前归档格式会在元数据中校验，避免直接应用不兼容的旧资源。
+- `v0.9.39` 将归档格式升级为 29。`v0.9.38` 及更早版本生成的存档需要重新转换；元数据校验会阻止直接应用不兼容的旧资源。
 
 ## 实现边界
 
