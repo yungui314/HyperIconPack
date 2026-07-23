@@ -9,9 +9,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,10 +38,9 @@ private data class ConversionSource(
 )
 
 /**
- * System-theme-only settings surface. Its preference primitives adapt to the
- * Material 3 visual system without changing any root action. No switch in
- * this screen enables a live desktop or SystemUI icon hook: the
- * selected appfilter is always converted into HyperOS's private icons archive.
+ * System-theme-only settings surface built with Miuix preference primitives.
+ * No switch in this screen enables a live desktop or SystemUI icon hook:
+ * the selected appfilter is always converted into HyperOS's private icons archive.
  */
 @Composable
 fun IconPackSettingsScreen(
@@ -70,7 +69,6 @@ fun IconPackSettingsScreen(
     // the same whenever it enters composition so its action summary reflects
     // the permission KernelSU/other Root manager has actually granted.
     var rootSummary by remember { mutableStateOf("正在检查 Root 授权…") }
-    var rootBusy by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
@@ -136,12 +134,6 @@ fun IconPackSettingsScreen(
         kotlin.math.abs(fallbackScaleOptions[index] - config.fallbackScaleMultiplier)
     } ?: 1
 
-    fun runRootAction(action: () -> RootAccess.Result, successSummary: String) {
-        if (rootBusy) return
-        coroutineScope.launch {
-            rootBusy = true
-            val result = withContext(Dispatchers.IO) {
-                RootAccess.check().takeIf { !it.success } ?: action()
             }
             rootSummary = if (result.success) {
                 successSummary
@@ -501,16 +493,6 @@ fun IconPackSettingsScreen(
                 }
             }
 
-            item {
-                IconSectionTitle("Root 快捷操作")
-                IconCard(modifier = Modifier.padding(horizontal = 12.dp)) {
-                    IconArrowPreference(
-                        title = "一键重启设备",
-                        summary = if (rootBusy) "正在请求重启…" else "${rootSummary}。立即重启 Android，用于完整刷新系统主题和图标缓存。",
-                        onClick = { runRootAction(RootAccess::rebootSystem, "已请求重启设备") },
-                    )
-                }
-            }
         }
     }
 }
@@ -568,7 +550,7 @@ private fun IconPackConversionPickerScreen(
         ) {
             item {
                 IconCard(modifier = Modifier.padding(horizontal = 12.dp)) {
-                    OutlinedTextField(
+                    TextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
                         label = { Text("搜索图标包名称或包名") },

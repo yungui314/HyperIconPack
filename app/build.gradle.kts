@@ -70,9 +70,6 @@ kotlin {
 dependencies {
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.core:core-ktx:1.17.0")
-    // Kept only for the legacy, no-longer-routed settings screen. Active UI
-    // surfaces use Miuix components exclusively.
-    implementation("androidx.compose.material3:material3:1.4.0")
     implementation("top.yukonga.miuix.kmp:miuix-ui:0.9.3")
     implementation("top.yukonga.miuix.kmp:miuix-preference:0.9.3")
     implementation("top.yukonga.miuix.kmp:miuix-icons:0.9.3")
