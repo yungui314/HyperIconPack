@@ -9,7 +9,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
-internal const val ICON_ARCHIVE_FORMAT_VERSION = 30
+internal const val ICON_ARCHIVE_FORMAT_VERSION = 31
 
 internal data class IconArchiveInfo(
     val archive: File,
@@ -21,11 +21,14 @@ internal data class IconArchiveInfo(
     val monetForegroundColor: Int,
     val applicationScopeFingerprint: String,
     val monetPaletteFingerprint: String,
+    val nativeFallback: Boolean,
+    val nativeFallbackScale: Float?,
     val formatVersion: Int?,
 ) {
     val isCurrentFormat: Boolean
         get() = formatVersion == ICON_ARCHIVE_FORMAT_VERSION &&
-            (!globalMonetIcons || monetPaletteFingerprint.isNotBlank())
+            (!globalMonetIcons || monetPaletteFingerprint.isNotBlank()) &&
+            (!nativeFallback || nativeFallbackScale?.isFinite() == true)
 }
 
 internal data class IconArchiveVariant(
@@ -37,6 +40,8 @@ internal data class IconArchiveVariant(
     val monetForegroundColor: Int,
     val applicationScopeFingerprint: String,
     val monetPaletteFingerprint: String,
+    val nativeFallback: Boolean = false,
+    val nativeFallbackScale: Float? = null,
 )
 
 internal object IconArchiveFormat {
@@ -77,6 +82,8 @@ internal object IconArchiveFormat {
                     ?: IconPackConfig.DEFAULT_MONET_FOREGROUND_COLOR,
                 applicationScopeFingerprint = values["application_scope"] ?: ALL_APPLICATIONS_SCOPE,
                 monetPaletteFingerprint = values["monet_palette_fingerprint"].orEmpty(),
+                nativeFallback = values["native_fallback"] == "true",
+                nativeFallbackScale = values["native_fallback_scale"]?.toFloatOrNull(),
                 formatVersion = values["format"]?.toIntOrNull(),
             )
         }
@@ -90,6 +97,10 @@ internal object IconArchiveFormat {
         require(!variant.globalMonetIcons || variant.monetPaletteFingerprint.isNotBlank()) {
             "Monet 主题归档缺少色板指纹"
         }
+        require(
+            !variant.nativeFallback ||
+                variant.nativeFallbackScale?.let { scale -> scale.isFinite() && scale > 0f } == true,
+        ) { "原生 fallback 主题归档缺少有效缩放" }
         val metadata = buildString {
             append("format=").append(ICON_ARCHIVE_FORMAT_VERSION).append('\n')
             append("icon_pack_package=").append(variant.iconPackPackage).append('\n')
@@ -108,6 +119,10 @@ internal object IconArchiveFormat {
                 .append('\n')
             append("monet_palette_fingerprint=").append(variant.monetPaletteFingerprint).append('\n')
             append("application_scope=").append(variant.applicationScopeFingerprint).append('\n')
+            append("native_fallback=").append(variant.nativeFallback).append('\n')
+            if (variant.nativeFallback) {
+                append("native_fallback_scale=").append(variant.nativeFallbackScale).append('\n')
+            }
         }
         zip.putNextEntry(ZipEntry(METADATA_ENTRY))
         try {
@@ -117,15 +132,12 @@ internal object IconArchiveFormat {
         }
     }
 
-    fun writeTransformConfig(zip: ZipOutputStream, useDynamicIcon: Boolean) {
-        val config = """
-            <?xml version="1.0" encoding="UTF-8"?>
-            <IconTransform>
-                <Config name="SupportLayerIcon" value="false" />
-                <Config name="UseDynamicIcon" value="$useDynamicIcon" />
-                <Config name="ConfigIconMask" value="M0 0H100V100H0Z" />
-            </IconTransform>
-        """.trimIndent()
+    fun writeTransformConfig(
+        zip: ZipOutputStream,
+        useDynamicIcon: Boolean,
+        nativeFallbackScale: Float? = null,
+    ) {
+        val config = transformConfig(useDynamicIcon, nativeFallbackScale)
         zip.putNextEntry(ZipEntry(TRANSFORM_CONFIG_ENTRY))
         try {
             zip.write(config.toByteArray(Charsets.UTF_8))
@@ -135,15 +147,15 @@ internal object IconArchiveFormat {
     }
 
     fun ensureTransformConfig(iconArchive: File, enableDynamicIcons: Boolean): File {
+        val nativeFallbackScale = readInfo(iconArchive)
+            ?.takeIf(IconArchiveInfo::nativeFallback)
+            ?.nativeFallbackScale
+        val expectedConfig = transformConfig(enableDynamicIcons, nativeFallbackScale)
         ZipFile(iconArchive).use { zip ->
             val existing = zip.getEntry(TRANSFORM_CONFIG_ENTRY)
             if (existing != null) {
                 val content = zip.getInputStream(existing).use { it.readBytes().toString(Charsets.UTF_8) }
-                val expected = enableDynamicIcons.toString()
-                if (
-                    content.contains("name=\"UseDynamicIcon\" value=\"$expected\"") &&
-                    content.contains("name=\"SupportLayerIcon\" value=\"false\"")
-                ) {
+                if (content.trim() == expectedConfig.trim()) {
                     return iconArchive
                 }
             }
@@ -154,7 +166,11 @@ internal object IconArchiveFormat {
             ZipFile(iconArchive).use { input ->
                 ZipOutputStream(BufferedOutputStream(FileOutputStream(temporary))).use { output ->
                     output.setLevel(Deflater.NO_COMPRESSION)
-                    writeTransformConfig(output, useDynamicIcon = enableDynamicIcons)
+                    writeTransformConfig(
+                        zip = output,
+                        useDynamicIcon = enableDynamicIcons,
+                        nativeFallbackScale = nativeFallbackScale,
+                    )
                     input.entries().asSequence().forEach { entry ->
                         if (entry.name == TRANSFORM_CONFIG_ENTRY) return@forEach
                         output.putNextEntry(ZipEntry(entry.name))
@@ -181,11 +197,18 @@ internal object IconArchiveFormat {
     }
 
     fun validate(file: File, expectedIconEntries: Int) {
+        val info = readInfo(file)
+        require(
+            info?.isCurrentFormat == true &&
+                !info.iconPackPackage.isNullOrBlank() &&
+                info.fallbackScaleMultiplier != null,
+        ) { "主题归档校验失败：转换元数据无效" }
         ZipFile(file).use { zip ->
             val iconEntries = zip.entries().asSequence().filter { entry ->
                 !entry.isDirectory &&
                     entry.name.startsWith("${IconArchiveEntryNames.TARGET_DENSITY_DIRECTORY}/") &&
-                    entry.name.endsWith(".png")
+                    entry.name.endsWith(".png") &&
+                    !IconArchiveEntryNames.isNativeFallbackEntry(entry.name)
             }.toList()
             require(iconEntries.size == expectedIconEntries) {
                 "主题归档校验失败：期望 $expectedIconEntries 个图标，实际 ${iconEntries.size} 个"
@@ -199,13 +222,31 @@ internal object IconArchiveFormat {
             require(zip.getEntry(METADATA_ENTRY)?.size ?: 0L > 0L) {
                 "主题归档校验失败：缺少 $METADATA_ENTRY"
             }
+            if (info.nativeFallback) {
+                require(IconArchiveEntryNames.NATIVE_FALLBACK_ENTRIES.all { entryName ->
+                    zip.getEntry(entryName)?.size ?: 0L > 0L
+                }) { "主题归档校验失败：原生 fallback 图层不完整" }
+            }
         }
-        val info = readInfo(file)
-        require(
-            info?.isCurrentFormat == true &&
-                !info.iconPackPackage.isNullOrBlank() &&
-                info.fallbackScaleMultiplier != null,
-        ) { "主题归档校验失败：转换元数据无效" }
+    }
+
+    private fun transformConfig(useDynamicIcon: Boolean, nativeFallbackScale: Float?): String {
+        require(nativeFallbackScale == null || nativeFallbackScale.isFinite()) {
+            "原生 fallback 缩放无效"
+        }
+        return buildString {
+            appendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+            appendLine("<IconTransform>")
+            appendLine("    <Config name=\"SupportLayerIcon\" value=\"false\" />")
+            appendLine("    <Config name=\"UseDynamicIcon\" value=\"$useDynamicIcon\" />")
+            if (nativeFallbackScale == null) {
+                appendLine("    <Config name=\"ConfigIconMask\" value=\"M0 0H100V100H0Z\" />")
+            } else {
+                appendLine("    <ScaleX value=\"$nativeFallbackScale\" />")
+                appendLine("    <ScaleY value=\"$nativeFallbackScale\" />")
+            }
+            append("</IconTransform>")
+        }
     }
 
     private fun legacyInfo(archive: File) = IconArchiveInfo(
@@ -218,6 +259,8 @@ internal object IconArchiveFormat {
         monetForegroundColor = IconPackConfig.DEFAULT_MONET_FOREGROUND_COLOR,
         applicationScopeFingerprint = ALL_APPLICATIONS_SCOPE,
         monetPaletteFingerprint = "",
+        nativeFallback = false,
+        nativeFallbackScale = null,
         formatVersion = null,
     )
 }

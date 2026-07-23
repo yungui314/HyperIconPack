@@ -94,6 +94,46 @@ class HyperOsIconArchiveConverterTest {
         }
     }
 
+    @Test
+    fun `native fallback transform keeps scale and omits full mask`() {
+        val archive = File.createTempFile("hyper-iconpack-native-transform", ".zip")
+        try {
+            ZipOutputStream(FileOutputStream(archive)).use { output ->
+                val variant = IconArchiveVariant(
+                    iconPackPackage = "com.example.icons",
+                    fallbackScaleMultiplier = 0.85f,
+                    globalMonetIcons = false,
+                    monetCustomColors = false,
+                    monetBackgroundColor = 0,
+                    monetForegroundColor = 0,
+                    applicationScopeFingerprint = "apps",
+                    monetPaletteFingerprint = "",
+                    nativeFallback = true,
+                    nativeFallbackScale = 0.9775f,
+                )
+                IconArchiveFormat.writeMetadata(output, variant)
+                IconArchiveFormat.writeTransformConfig(
+                    zip = output,
+                    useDynamicIcon = false,
+                    nativeFallbackScale = variant.nativeFallbackScale,
+                )
+            }
+
+            HyperOsIconArchiveConverter.ensureUseDynamicIconTransformConfig(
+                iconArchive = archive,
+                enableDynamicIcons = true,
+            )
+
+            val config = readTransformConfig(archive)
+            assertTrue(config.contains("name=\"UseDynamicIcon\" value=\"true\""))
+            assertTrue(config.contains("<ScaleX value=\"0.9775\" />"))
+            assertTrue(config.contains("<ScaleY value=\"0.9775\" />"))
+            assertFalse(config.contains("ConfigIconMask"))
+        } finally {
+            archive.delete()
+        }
+    }
+
     private fun createArchiveWithTransformConfig(configXml: String): File {
         val archive = File.createTempFile("hyper-iconpack-transform", ".zip")
         ZipOutputStream(FileOutputStream(archive)).use { output ->

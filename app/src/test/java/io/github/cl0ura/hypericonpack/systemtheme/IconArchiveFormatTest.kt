@@ -2,8 +2,11 @@ package io.github.cl0ura.hypericonpack.systemtheme
 
 import java.io.File
 import java.io.FileOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertThrows
 import org.junit.Test
@@ -21,11 +24,22 @@ class IconArchiveFormatTest {
             monetForegroundColor = 0xFFABCDEF.toInt(),
             applicationScopeFingerprint = "0123456789abcdefghij",
             monetPaletteFingerprint = "ff123456:ff789abc:ffabcdef",
+            nativeFallback = true,
+            nativeFallbackScale = 0.9775f,
         )
         try {
             ZipOutputStream(FileOutputStream(archive)).use { output ->
                 IconArchiveFormat.writeMetadata(output, variant)
-                IconArchiveFormat.writeTransformConfig(output, useDynamicIcon = false)
+                IconArchiveFormat.writeTransformConfig(
+                    zip = output,
+                    useDynamicIcon = false,
+                    nativeFallbackScale = variant.nativeFallbackScale,
+                )
+                IconArchiveEntryNames.NATIVE_FALLBACK_ENTRIES.forEach { entryName ->
+                    output.putNextEntry(ZipEntry(entryName))
+                    output.write(byteArrayOf(1))
+                    output.closeEntry()
+                }
             }
 
             val info = requireNotNull(IconArchiveFormat.readInfo(archive))
@@ -41,8 +55,17 @@ class IconArchiveFormatTest {
             assertEquals(variant.monetForegroundColor, info.monetForegroundColor)
             assertEquals(variant.applicationScopeFingerprint, info.applicationScopeFingerprint)
             assertEquals(variant.monetPaletteFingerprint, info.monetPaletteFingerprint)
+            assertTrue(info.nativeFallback)
+            assertEquals(variant.nativeFallbackScale, info.nativeFallbackScale)
             assertTrue(info.isCurrentFormat)
             IconArchiveFormat.validate(archive, expectedIconEntries = 0)
+            ZipFile(archive).use { zip ->
+                val config = zip.getInputStream(zip.getEntry(IconArchiveFormat.TRANSFORM_CONFIG_ENTRY))
+                    .use { it.readBytes().toString(Charsets.UTF_8) }
+                assertTrue(config.contains("<ScaleX value=\"0.9775\" />"))
+                assertTrue(config.contains("<ScaleY value=\"0.9775\" />"))
+                assertFalse(config.contains("ConfigIconMask"))
+            }
         } finally {
             archive.delete()
         }

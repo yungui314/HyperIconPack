@@ -202,7 +202,7 @@ internal class IconPackFallbackDrawable(
         shapeLayer.draw(maskCanvas)
         // iconback alpha describes visible content directly; only standard
         // iconmask resources can use the inverse-alpha convention.
-        val inverseMask = mask != null && isInverseMask(bitmap)
+        val inverseMask = mask != null && IconPackMaskSemantics.isInverse(bitmap)
         maskPaint.xfermode = PorterDuffXfermode(
             if (inverseMask) PorterDuff.Mode.DST_OUT else PorterDuff.Mode.DST_IN,
         )
@@ -246,44 +246,6 @@ internal class IconPackFallbackDrawable(
             sourceBounds.right.roundToInt(),
             sourceBounds.bottom.roundToInt(),
         )
-    }
-
-    /**
-     * Standard appfilter masks normally have alpha in the area to remove
-     * (opaque corners, transparent centre).  Detect that layout instead of
-     * hard-coding it so conventional non-inverted circle masks still work.
-     */
-    private fun isInverseMask(bitmap: Bitmap): Boolean {
-        val minimum = minOf(bitmap.width, bitmap.height)
-        val step = maxOf(1, minimum / 32)
-        val band = maxOf(1, minimum / 16)
-        var edgeTotal = 0L
-        var edgeCount = 0
-        val depths = listOf(0, band / 2, band - 1).distinct()
-        depths.forEach { depth ->
-            for (x in 0 until bitmap.width step step) {
-                edgeTotal += bitmap.getPixel(x, depth) ushr 24
-                edgeTotal += bitmap.getPixel(x, bitmap.height - 1 - depth) ushr 24
-                edgeCount += 2
-            }
-            for (y in 0 until bitmap.height step step) {
-                edgeTotal += bitmap.getPixel(depth, y) ushr 24
-                edgeTotal += bitmap.getPixel(bitmap.width - 1 - depth, y) ushr 24
-                edgeCount += 2
-            }
-        }
-
-        var centreTotal = 0L
-        var centreCount = 0
-        for (y in bitmap.height / 3..bitmap.height * 2 / 3 step step) {
-            for (x in bitmap.width / 3..bitmap.width * 2 / 3 step step) {
-                centreTotal += bitmap.getPixel(x, y) ushr 24
-                centreCount++
-            }
-        }
-        val edgeAlpha = edgeTotal.toDouble() / edgeCount.coerceAtLeast(1)
-        val centreAlpha = centreTotal.toDouble() / centreCount.coerceAtLeast(1)
-        return edgeAlpha - centreAlpha > MASK_DIRECTION_THRESHOLD
     }
 
     private fun isCircularMask(bitmap: Bitmap, inverseMask: Boolean): Boolean {
@@ -343,7 +305,6 @@ internal class IconPackFallbackDrawable(
         const val EDGE_INSET_FRACTION = 1f / 256f
         const val MIN_SCALE = 0.5f
         const val MAX_SCALE = 2f
-        const val MASK_DIRECTION_THRESHOLD = 32.0
         const val MASK_VISIBLE_ALPHA_THRESHOLD = 128
         const val CIRCLE_EDGE_RATIO_DENOMINATOR = 4
     }

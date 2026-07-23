@@ -36,6 +36,18 @@ internal class ParsedIconPack private constructor(
     val supportsFallbackStyle: Boolean
         get() = fallbackStyle?.hasRenderableLayers == true
 
+    val fallbackCapabilities: IconPackFallbackCapabilities?
+        get() = fallbackStyle
+            ?.takeIf(IconPackFallbackStyle::hasRenderableLayers)
+            ?.let { style ->
+                IconPackFallbackCapabilities(
+                    declaredPatternCount = style.backgroundNames.size,
+                    hasDeclaredMask = style.maskName != null,
+                    hasDeclaredBorder = style.foregroundName != null,
+                    declaredScale = style.scale,
+                )
+            }
+
     private val resources: Resources = packageContext.resources
     private val constantStates = ConcurrentHashMap<String, Drawable.ConstantState>()
     /**
@@ -75,6 +87,22 @@ internal class ParsedIconPack private constructor(
                 drawablePrefix = entry.value,
             )
         }
+    }
+
+    /** Resolves the standard appfilter fallback stack for Xiaomi's native composer. */
+    fun loadNativeThemeFallback(scaleMultiplier: Float): IconPackThemeFallback? {
+        val style = fallbackStyle?.takeIf(IconPackFallbackStyle::hasRenderableLayers) ?: return null
+        val pattern = style.backgroundNames.asSequence().mapNotNull(::loadDrawable).firstOrNull()
+        val mask = style.maskName?.let(::loadDrawable)
+        val border = style.foregroundName?.let(::loadDrawable)
+        if (pattern == null && mask == null && border == null) return null
+        return IconPackThemeFallback(
+            mask = mask,
+            pattern = pattern,
+            border = border,
+            scale = (style.scale * scaleMultiplier).coerceIn(MIN_FALLBACK_SCALE, MAX_FALLBACK_SCALE),
+            declaredPatternCount = style.backgroundNames.size,
+        )
     }
 
     /**

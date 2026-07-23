@@ -68,6 +68,9 @@ class PackageEntryOwnershipTest {
                 "com.example.app",
             ),
         )
+        IconArchiveEntryNames.NATIVE_FALLBACK_ENTRIES.forEach { entryName ->
+            assertFalse(IconArchiveEntryNames.entryBelongsToPackage(entryName, "icon_mask"))
+        }
     }
 
     @Test

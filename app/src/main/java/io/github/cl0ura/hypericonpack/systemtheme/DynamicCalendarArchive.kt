@@ -130,12 +130,19 @@ internal object DynamicCalendarArchive {
         }
         if (dynamicArchive == null && !hasEmbeddedEntries) return
 
+        val nativeFallbackScale = IconArchiveFormat.readInfo(iconArchive)
+            ?.takeIf(IconArchiveInfo::nativeFallback)
+            ?.nativeFallbackScale
         val temporary = File(iconArchive.parentFile, "${iconArchive.name}.embed-dynamic.new")
         try {
             ZipFile(iconArchive).use { icons ->
                 ZipOutputStream(BufferedOutputStream(FileOutputStream(temporary))).use { output ->
                     output.setLevel(Deflater.NO_COMPRESSION)
-                    IconArchiveFormat.writeTransformConfig(output, useDynamicIcon = false)
+                    IconArchiveFormat.writeTransformConfig(
+                        zip = output,
+                        useDynamicIcon = false,
+                        nativeFallbackScale = nativeFallbackScale,
+                    )
                     val written = HashSet<String>()
                     icons.entries().asSequence().forEach { entry ->
                         checkCancelled(isCancelled)

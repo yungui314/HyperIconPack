@@ -10,6 +10,19 @@ import android.content.ComponentName
 internal object IconArchiveEntryNames {
     const val TARGET_DENSITY_DIRECTORY = "res/drawable-xxhdpi"
     const val DYNAMIC_ROOT_DIRECTORY = "animating_icons"
+    const val ICON_MASK_ENTRY = "$TARGET_DENSITY_DIRECTORY/icon_mask.png"
+    const val ICON_BACKGROUND_ENTRY = "$TARGET_DENSITY_DIRECTORY/icon_background.png"
+    const val ICON_PATTERN_ENTRY = "$TARGET_DENSITY_DIRECTORY/icon_pattern.png"
+    const val ICON_BORDER_ENTRY = "$TARGET_DENSITY_DIRECTORY/icon_border.png"
+
+    val NATIVE_FALLBACK_ENTRIES: Set<String> = setOf(
+        ICON_MASK_ENTRY,
+        ICON_BACKGROUND_ENTRY,
+        ICON_PATTERN_ENTRY,
+        ICON_BORDER_ENTRY,
+    )
+
+    fun isNativeFallbackEntry(entryName: String): Boolean = entryName in NATIVE_FALLBACK_ENTRIES
 
     fun archiveEntryName(component: ComponentName): String {
         // ZIP entry names are case-sensitive. HyperOS passes the installed
@@ -29,6 +42,7 @@ internal object IconArchiveEntryNames {
         "$TARGET_DENSITY_DIRECTORY/$packageName.png"
 
     fun entryBelongsToPackage(entryName: String, packageName: String): Boolean {
+        if (isNativeFallbackEntry(entryName)) return false
         val iconPrefix = "$TARGET_DENSITY_DIRECTORY/"
         if (entryName.startsWith(iconPrefix)) {
             val leaf = entryName.removePrefix(iconPrefix)
