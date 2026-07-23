@@ -8,6 +8,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      JAVA_TOOL_OPTIONS: -XX:-UseContainerSupport
     steps:
       - name: Checkout
         uses: actions/checkout@v4
