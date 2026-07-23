@@ -24,6 +24,10 @@ internal object PackageThemeArchiveUpdateScheduler {
             // native HyperOS THEME_FLAG_ICON configuration refresh.
             .setMinimumLatency(0L)
             .setOverrideDeadline(3_000L)
+            // Keep package-install archive updates eligible while idle/charging
+            // constraints would otherwise defer HyperOS icon refresh.
+            .setRequiresCharging(false)
+            .setRequiresDeviceIdle(false)
             .build()
         return scheduler.schedule(job) == JobScheduler.RESULT_SUCCESS
     }

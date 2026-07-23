@@ -11,6 +11,9 @@ import java.util.concurrent.TimeUnit
  * Small, explicit root-command bridge for user-initiated UI actions only.
  * Nothing runs automatically at process start, and commands are fixed here
  * rather than accepting arbitrary shell text from preferences or Intents.
+ *
+ * force-stop / pkill / reboot helpers are intentionally absent: icon surfaces
+ * are refreshed only through HyperOS THEME_FLAG_ICON = 0x8 configuration path.
  */
 internal object RootAccess {
     private const val COMMAND_TIMEOUT_SECONDS = 12L
@@ -25,13 +28,6 @@ internal object RootAccess {
         return result.copy(success = result.success && result.output.contains("uid=0"))
     }
 
-    fun restartLauncher(): Result = runFixed(
-        "am force-stop com.miui.home; " +
-            "cmd activity start-activity -a android.intent.action.MAIN -c android.intent.category.HOME",
-    )
-
-    fun restartSystemUi(): Result = runFixed("pkill -f com.android.systemui")
-
     /**
      * Reloads icon caches after applying or restoring the Root-managed runtime
      * archive by replaying Theme Manager's THEME_FLAG_ICON = 0x8 path.
@@ -40,9 +36,6 @@ internal object RootAccess {
         command = IconSurfaceRefreshCommand.command,
         timeoutSeconds = 20L,
     )
-
-    /** User-initiated full reboot for surfaces whose caches survive process restarts. */
-    fun rebootSystem(): Result = runFixed("svc power reboot")
 
     /** Reads the bounded persistent log, which survives logcat rotation and reboots. */
     fun readAppLogs(context: Context): Result = Result(true, AppLog.read(context))
@@ -130,5 +123,4 @@ internal object RootAccess {
             Result(false, throwable.javaClass.simpleName + ": " + (throwable.message ?: "无法执行 su"))
         }
     }
-
 }

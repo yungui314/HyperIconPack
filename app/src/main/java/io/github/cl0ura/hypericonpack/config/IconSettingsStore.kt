@@ -41,8 +41,11 @@ class IconSettingsStore(context: Context) {
 
     fun write(config: IconPackConfig): IconPackConfig {
         val packageName = config.packageName?.takeIf { it.isNotBlank() }
+        // Animation bridge is retired; always persist/publish false so old
+        // remote-preference clients cannot re-enable launcher drawable hooks.
         val normalized = config.copy(
             packageName = packageName,
+            systemThemeAnimationBridge = false,
             revision = System.currentTimeMillis(),
         )
         preferences.edit()
@@ -57,7 +60,7 @@ class IconSettingsStore(context: Context) {
             .putInt(KEY_MONET_FOREGROUND_COLOR, normalized.monetForegroundColor)
             .putBoolean(KEY_CONVERSION_ALL_APPLICATIONS, normalized.conversionAllApplications)
             .putBoolean(KEY_SYSTEM_THEME_ACTIVE, normalized.systemThemeActive)
-            .putBoolean(KEY_SYSTEM_THEME_ANIMATION_BRIDGE, normalized.systemThemeAnimationBridge)
+            .putBoolean(KEY_SYSTEM_THEME_ANIMATION_BRIDGE, false)
             .putLong(KEY_REVISION, normalized.revision)
             // Retire state from the previous live Drawable replacement path.
             .remove("enabled")

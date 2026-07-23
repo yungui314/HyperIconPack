@@ -178,7 +178,7 @@ object XposedServiceBridge : XposedServiceHelper.OnServiceListener {
                     putBoolean(IconRemoteConfig.KEY_SYSTEM_THEME_ACTIVE, config.systemThemeActive)
                     putBoolean(
                         IconRemoteConfig.KEY_SYSTEM_THEME_ANIMATION_BRIDGE,
-                        config.systemThemeAnimationBridge,
+                        false,
                     )
                     putLong(IconRemoteConfig.KEY_REVISION, config.revision)
                 }

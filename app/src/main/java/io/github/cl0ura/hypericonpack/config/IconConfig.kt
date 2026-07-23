@@ -55,7 +55,10 @@ data class IconPackConfig(
     val conversionAllApplications: Boolean = true,
     /** True only after this module has installed its managed HyperOS icons ZIP. */
     val systemThemeActive: Boolean = false,
-    /** Launcher-only compatibility bridge for native themed-icon transitions. */
+    /**
+     * Retired launcher animation-bridge flag. Kept only so old preference
+     * snapshots deserialize safely; writes always force this to false.
+     */
     val systemThemeAnimationBridge: Boolean = false,
     val revision: Long,
 ) {

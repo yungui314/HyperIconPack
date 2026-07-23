@@ -29,5 +29,9 @@ class IconSurfaceRefreshCommandTest {
         assertFalse(command.contains("pidof com.android.systemui"))
         assertFalse(command.contains("HYPER_ICONPACK_SURFACES_RESTARTED"))
         assertFalse(command.contains("am force-stop com.miui.home"))
+        assertFalse(command.contains("pkill"))
+        assertFalse(command.contains("svc power reboot"))
+        assertFalse(command.contains("restart"))
     }
 }
+
