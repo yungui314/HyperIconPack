@@ -32,8 +32,9 @@ internal object RootAccess {
      * Reloads icon caches after applying or restoring the Root-managed runtime
      * archive by replaying Theme Manager's THEME_FLAG_ICON = 0x8 path.
      */
-    fun refreshIconSurfaces(): Result = runFixed(
+    fun refreshIconSurfaces(context: Context): Result = runFixedWithInput(
         command = IconSurfaceRefreshCommand.command,
+        input = (context.applicationInfo.sourceDir + "\n").byteInputStream(),
         timeoutSeconds = 20L,
     )
 

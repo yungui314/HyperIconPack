@@ -11,8 +11,15 @@ package io.github.cl0ura.hypericonpack.root
 internal object IconSurfaceRefreshCommand {
     val command: String = """
         set -e
-        apk_path="${'$'}(pm path io.github.cl0ura.hypericonpack | head -n 1 | sed 's/^package://')"
-        [ -n "${'$'}apk_path" ] || {
+        IFS= read -r apk_path
+        case "${'$'}apk_path" in
+          /data/app/*/base.apk) ;;
+          *)
+            echo 'HYPER_ICONPACK_THEME_CONFIGURATION_INVALID_APK'
+            exit 76
+            ;;
+        esac
+        [ -f "${'$'}apk_path" ] || {
           echo 'HYPER_ICONPACK_THEME_CONFIGURATION_MISSING_APK'
           exit 76
         }

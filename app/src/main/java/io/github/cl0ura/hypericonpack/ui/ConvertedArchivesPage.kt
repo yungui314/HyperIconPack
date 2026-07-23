@@ -116,7 +116,7 @@ internal fun ConvertedArchivesPage(
             val installAndRefresh = withContext(Dispatchers.IO) {
                 ThemeArchiveMutationGate.withLock {
                     val install = RootThemeIconInstaller.install(archive.archive)
-                    val refresh = if (install.success) RootAccess.refreshIconSurfaces() else null
+                    val refresh = if (install.success) RootAccess.refreshIconSurfaces(context) else null
                     install to refresh
                 }
             }

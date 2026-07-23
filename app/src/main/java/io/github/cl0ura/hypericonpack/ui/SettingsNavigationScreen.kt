@@ -203,7 +203,7 @@ internal fun SettingsOverviewPage(
             val restoreAndRefresh = withContext(Dispatchers.IO) {
                 ThemeArchiveMutationGate.withLock {
                     val restore = RootThemeIconInstaller.restore()
-                    val refresh = if (restore.success) RootAccess.refreshIconSurfaces() else null
+                    val refresh = if (restore.success) RootAccess.refreshIconSurfaces(context) else null
                     restore to refresh
                 }
             }

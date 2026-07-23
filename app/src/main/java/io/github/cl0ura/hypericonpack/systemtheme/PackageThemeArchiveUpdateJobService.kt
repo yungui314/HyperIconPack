@@ -299,7 +299,7 @@ private object PackageThemeArchiveUpdateWorker {
                 )
                 true
             } else {
-                val refresh = RootAccess.refreshIconSurfaces()
+                val refresh = RootAccess.refreshIconSurfaces(context)
                 if (!refresh.success) {
                     PackageThemeArchiveUpdateScheduler.log(
                         context,
