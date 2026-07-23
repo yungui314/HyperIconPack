@@ -1,4 +1,4 @@
-package io.github.cl0ura.hypericonpack.ui
+package io.github.cl0ura.hypericonpack.root
 
 import android.content.Context
 import io.github.cl0ura.hypericonpack.logging.AppLog

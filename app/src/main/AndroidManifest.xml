@@ -70,14 +70,16 @@
             </intent-filter>
         </activity>
 
-        <!-- New applications are added to the native theme archive in one
-             coalesced background update; no live icon replacement is used. -->
+        <!-- Package installs/replacements are added to the native theme archive
+             and full uninstalls drop their entries, all in one coalesced
+             background rewrite. No live icon replacement is used. -->
         <receiver
             android:name=".systemtheme.PackageThemeArchiveUpdateReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.PACKAGE_ADDED" />
                 <action android:name="android.intent.action.PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.PACKAGE_REMOVED" />
                 <data android:scheme="package" />
             </intent-filter>
         </receiver>

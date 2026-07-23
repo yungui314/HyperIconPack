@@ -7,21 +7,13 @@ import io.github.cl0ura.hypericonpack.config.IconSettingsStore
 import io.github.cl0ura.hypericonpack.logging.AppLog
 
 /**
- * Records package installation/update events and hands the ZIP rewrite to a
- * JobService.  Rewriting thousands of already-converted ZIP entries inside a
- * BroadcastReceiver is unreliable: Android is free to end the hosting process
- * after `onReceive`, even when a worker thread was started with `goAsync()`.
+ * Queues installed/replaced packages for a durable archive update, and queues
+ * fully removed packages so their theme entries do not linger forever.
  */
 class PackageThemeArchiveUpdateReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        val action = intent.action
-        if (action != Intent.ACTION_PACKAGE_ADDED && action != Intent.ACTION_PACKAGE_REPLACED) return
-        // PACKAGE_ADDED with EXTRA_REPLACING is followed by PACKAGE_REPLACED.
-        // Queue only the latter so an app update produces one archive rewrite.
-        if (action == Intent.ACTION_PACKAGE_ADDED && intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return
+    override fun onReceive(context: Context, intent: Intent?) {
+        val action = intent?.action ?: return
         val packageName = intent.data?.schemeSpecificPart?.takeIf(String::isNotBlank) ?: return
-        if (packageName == context.packageName) return
-
         val appContext = context.applicationContext
         val settings = IconSettingsStore(appContext)
         val config = settings.read()
@@ -30,8 +22,27 @@ class PackageThemeArchiveUpdateReceiver : BroadcastReceiver() {
         // mapping needs an explicit user conversion; it is not a target app.
         if (packageName == config.packageName) return
 
-        settings.enqueueThemeArchivePackageUpdate(packageName)
-        val scheduled = PackageThemeArchiveUpdateScheduler.schedule(appContext)
-        AppLog.info(context, "Queued $packageName for incremental theme archive update (scheduled=$scheduled)")
+        when (action) {
+            Intent.ACTION_PACKAGE_ADDED,
+            Intent.ACTION_PACKAGE_REPLACED,
+            -> {
+                settings.enqueueThemeArchivePackageUpdate(packageName)
+                val scheduled = PackageThemeArchiveUpdateScheduler.schedule(appContext)
+                AppLog.info(
+                    context,
+                    "Queued $packageName for incremental theme archive update (scheduled=$scheduled)",
+                )
+            }
+            Intent.ACTION_PACKAGE_REMOVED -> {
+                // Upgrades also emit PACKAGE_REMOVED with EXTRA_REPLACING=true.
+                if (intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return
+                settings.enqueueThemeArchivePackageRemoval(packageName)
+                val scheduled = PackageThemeArchiveUpdateScheduler.schedule(appContext)
+                AppLog.info(
+                    context,
+                    "Queued $packageName for theme archive removal (scheduled=$scheduled)",
+                )
+            }
+        }
     }
 }

@@ -1,5 +1,7 @@
 package io.github.cl0ura.hypericonpack.ui
 
+import io.github.cl0ura.hypericonpack.root.RootAccess
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent

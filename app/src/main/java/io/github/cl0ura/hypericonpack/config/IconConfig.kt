@@ -2,40 +2,24 @@ package io.github.cl0ura.hypericonpack.config
 
 import android.content.SharedPreferences
 
-/** API 102 remote-preference contract shared by the app and launcher module. */
+/**
+ * Minimal API 102 remote-preference contract.
+ *
+ * Icon replacement uses native HyperOS theme archives. The Xposed module only
+ * needs to know whether this app still owns the active theme so DRM bypass can
+ * stay scoped; Monet/scale settings are local conversion inputs only.
+ */
 object IconRemoteConfig {
     const val GROUP = "icon_config"
     const val KEY_PACKAGE_NAME = "package_name"
-    const val KEY_FALLBACK_SCALE = "fallback_scale"
-    const val KEY_GLOBAL_MONET_ICONS = "global_monet_icons"
-    const val KEY_MONET_CUSTOM_COLORS = "monet_custom_colors"
-    const val KEY_MONET_BACKGROUND_COLOR = "monet_background_color"
-    const val KEY_MONET_FOREGROUND_COLOR = "monet_foreground_color"
     const val KEY_SYSTEM_THEME_ACTIVE = "system_theme_active"
-    const val KEY_SYSTEM_THEME_ANIMATION_BRIDGE = "system_theme_animation_bridge"
     const val KEY_REVISION = "revision"
 
     fun read(preferences: SharedPreferences): IconPackConfig {
         val packageName = preferences.getString(KEY_PACKAGE_NAME, null)?.takeIf(String::isNotBlank)
         return IconPackConfig(
             packageName = packageName,
-            fallbackScaleMultiplier = preferences.getFloat(KEY_FALLBACK_SCALE, 0.85f)
-                .coerceIn(0.65f, 1.15f),
-            globalMonetIcons = preferences.getBoolean(KEY_GLOBAL_MONET_ICONS, false),
-            monetCustomColors = preferences.getBoolean(KEY_MONET_CUSTOM_COLORS, false),
-            monetBackgroundColor = preferences.getInt(
-                KEY_MONET_BACKGROUND_COLOR,
-                IconPackConfig.DEFAULT_MONET_BACKGROUND_COLOR,
-            ),
-            monetForegroundColor = preferences.getInt(
-                KEY_MONET_FOREGROUND_COLOR,
-                IconPackConfig.DEFAULT_MONET_FOREGROUND_COLOR,
-            ),
             systemThemeActive = preferences.getBoolean(KEY_SYSTEM_THEME_ACTIVE, false) && packageName != null,
-            systemThemeAnimationBridge = preferences.getBoolean(
-                KEY_SYSTEM_THEME_ANIMATION_BRIDGE,
-                false,
-            ) && packageName != null,
             revision = preferences.getLong(KEY_REVISION, 0L),
         )
     }
@@ -55,11 +39,6 @@ data class IconPackConfig(
     val conversionAllApplications: Boolean = true,
     /** True only after this module has installed its managed HyperOS icons ZIP. */
     val systemThemeActive: Boolean = false,
-    /**
-     * Retired launcher animation-bridge flag. Kept only so old preference
-     * snapshots deserialize safely; writes always force this to false.
-     */
-    val systemThemeAnimationBridge: Boolean = false,
     val revision: Long,
 ) {
     companion object {

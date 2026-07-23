@@ -1,4 +1,4 @@
-package io.github.cl0ura.hypericonpack.ui
+package io.github.cl0ura.hypericonpack.root
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -34,4 +34,3 @@ class IconSurfaceRefreshCommandTest {
         assertFalse(command.contains("restart"))
     }
 }
-

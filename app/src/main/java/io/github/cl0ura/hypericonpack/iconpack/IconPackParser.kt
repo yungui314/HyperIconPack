@@ -352,8 +352,8 @@ internal class ParsedIconPack private constructor(
         }
 
         private fun parseAppFilter(parser: XmlPullParser): ParsedAppFilter {
-            val mappings = HashMap<String, String>()
-            val calendars = HashMap<String, String>()
+            val mappings = LinkedHashMap<String, String>()
+            val calendars = LinkedHashMap<String, String>()
             val backgrounds = LinkedHashSet<String>()
             var maskName: String? = null
             var foregroundName: String? = null
@@ -425,27 +425,8 @@ internal class ParsedIconPack private constructor(
             return values
         }
 
-        private fun normalizeComponent(rawComponent: String): String? {
-            var value = rawComponent.trim()
-            if (value.startsWith("ComponentInfo{") && value.endsWith("}")) {
-                value = value.substring("ComponentInfo{".length, value.length - 1)
-            }
-            // Pseudo-components such as :CALENDAR are not application activities.
-            if (value.startsWith(':')) return null
-
-            val separator = value.indexOf('/')
-            if (separator <= 0 || separator == value.lastIndex) return null
-            val packageName = value.substring(0, separator)
-            val className = value.substring(separator + 1)
-            if (packageName.isBlank() || className.isBlank()) return null
-
-            val fullClassName = when {
-                className.startsWith('.') -> packageName + className
-                '.' !in className -> "$packageName.$className"
-                else -> className
-            }
-            return "${packageName.lowercase(Locale.ROOT)}/$fullClassName"
-        }
+        private fun normalizeComponent(rawComponent: String): String? =
+            IconPackComponentNormalizer.normalize(rawComponent)
 
         private val IMAGE_ATTRIBUTE = Regex("img\\d+")
         private const val CALENDAR_PROBE_SIZE = 96

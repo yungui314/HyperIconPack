@@ -34,18 +34,14 @@ class IconSettingsStore(context: Context) {
             ),
             conversionAllApplications = true,
             systemThemeActive = preferences.getBoolean(KEY_SYSTEM_THEME_ACTIVE, false),
-            systemThemeAnimationBridge = preferences.getBoolean(KEY_SYSTEM_THEME_ANIMATION_BRIDGE, false),
             revision = preferences.getLong(KEY_REVISION, 0L),
         )
     }
 
     fun write(config: IconPackConfig): IconPackConfig {
         val packageName = config.packageName?.takeIf { it.isNotBlank() }
-        // Animation bridge is retired; always persist/publish false so old
-        // remote-preference clients cannot re-enable launcher drawable hooks.
         val normalized = config.copy(
             packageName = packageName,
-            systemThemeAnimationBridge = false,
             revision = System.currentTimeMillis(),
         )
         preferences.edit()
@@ -60,22 +56,19 @@ class IconSettingsStore(context: Context) {
             .putInt(KEY_MONET_FOREGROUND_COLOR, normalized.monetForegroundColor)
             .putBoolean(KEY_CONVERSION_ALL_APPLICATIONS, normalized.conversionAllApplications)
             .putBoolean(KEY_SYSTEM_THEME_ACTIVE, normalized.systemThemeActive)
-            .putBoolean(KEY_SYSTEM_THEME_ANIMATION_BRIDGE, false)
             .putLong(KEY_REVISION, normalized.revision)
-            // Retire state from the previous live Drawable replacement path.
+            // Retire state from previous live Drawable / animation-bridge paths.
             .remove("enabled")
             .remove("style_unmapped")
             .remove("replace_system_ui")
-            // Retire the v0.9.7 fallback-only Monet experiment. Its caches
-            // use a separate identity and cannot be mistaken for this global
-            // luminance-preserving renderer.
             .remove("experimental_monet_fallbacks")
+            .remove(KEY_SYSTEM_THEME_ANIMATION_BRIDGE)
             .apply()
         XposedServiceBridge.publishConfig(normalized)
         return normalized
     }
 
-    /** Re-emits the current configuration so an alive launcher refreshes its animation bridge. */
+    /** Re-emits the current configuration to the Xposed service when connected. */
     fun touch(): IconPackConfig = write(read())
 
     /**
@@ -102,16 +95,12 @@ class IconSettingsStore(context: Context) {
      */
     fun markManagedThemeInactive() {
         val current = read()
-        if (current.systemThemeActive || current.systemThemeAnimationBridge) {
-            write(
-                current.copy(
-                    systemThemeActive = false,
-                    systemThemeAnimationBridge = false,
-                ),
-            )
+        if (current.systemThemeActive) {
+            write(current.copy(systemThemeActive = false))
         }
         writeActiveArchive(null)
         clearPendingThemeArchivePackageUpdates()
+        clearPendingThemeArchivePackageRemovals()
     }
 
     /**
@@ -122,6 +111,12 @@ class IconSettingsStore(context: Context) {
     fun enqueueThemeArchivePackageUpdate(packageName: String) {
         if (packageName.isBlank()) return
         synchronized(PENDING_UPDATE_LOCK) {
+            val pendingRemoves = preferences.getStringSet(KEY_PENDING_ARCHIVE_REMOVALS, emptySet())
+                .orEmpty()
+                .toMutableSet()
+            if (pendingRemoves.remove(packageName)) {
+                preferences.edit().putStringSet(KEY_PENDING_ARCHIVE_REMOVALS, pendingRemoves).apply()
+            }
             val pending = preferences.getStringSet(KEY_PENDING_ARCHIVE_UPDATES, emptySet())
                 .orEmpty()
                 .toMutableSet()
@@ -156,6 +151,53 @@ class IconSettingsStore(context: Context) {
             preferences.edit().remove(KEY_PENDING_ARCHIVE_UPDATES).apply()
         }
     }
+
+
+    fun enqueueThemeArchivePackageRemoval(packageName: String) {
+        if (packageName.isBlank()) return
+        synchronized(PENDING_UPDATE_LOCK) {
+            // A remove supersedes a pending re-add for the same package.
+            val pendingAdds = preferences.getStringSet(KEY_PENDING_ARCHIVE_UPDATES, emptySet())
+                .orEmpty()
+                .toMutableSet()
+            if (pendingAdds.remove(packageName)) {
+                preferences.edit().putStringSet(KEY_PENDING_ARCHIVE_UPDATES, pendingAdds).apply()
+            }
+            val pending = preferences.getStringSet(KEY_PENDING_ARCHIVE_REMOVALS, emptySet())
+                .orEmpty()
+                .toMutableSet()
+            if (pending.add(packageName)) {
+                preferences.edit().putStringSet(KEY_PENDING_ARCHIVE_REMOVALS, pending).apply()
+            }
+        }
+    }
+
+    fun pendingThemeArchivePackageRemovals(): List<String> = synchronized(PENDING_UPDATE_LOCK) {
+        preferences.getStringSet(KEY_PENDING_ARCHIVE_REMOVALS, emptySet())
+            .orEmpty()
+            .asSequence()
+            .filter(String::isNotBlank)
+            .sorted()
+            .toList()
+    }
+
+    fun markThemeArchivePackageRemovalComplete(packageName: String) {
+        synchronized(PENDING_UPDATE_LOCK) {
+            val pending = preferences.getStringSet(KEY_PENDING_ARCHIVE_REMOVALS, emptySet())
+                .orEmpty()
+                .toMutableSet()
+            if (pending.remove(packageName)) {
+                preferences.edit().putStringSet(KEY_PENDING_ARCHIVE_REMOVALS, pending).apply()
+            }
+        }
+    }
+
+    fun clearPendingThemeArchivePackageRemovals() {
+        synchronized(PENDING_UPDATE_LOCK) {
+            preferences.edit().remove(KEY_PENDING_ARCHIVE_REMOVALS).apply()
+        }
+    }
+
 
     /**
      * UI state intentionally lives beside the module configuration rather than
@@ -223,10 +265,12 @@ class IconSettingsStore(context: Context) {
         const val KEY_MONET_FOREGROUND_COLOR = "monet_foreground_color"
         const val KEY_CONVERSION_ALL_APPLICATIONS = "conversion_all_applications"
         const val KEY_SYSTEM_THEME_ACTIVE = "system_theme_active"
-        const val KEY_SYSTEM_THEME_ANIMATION_BRIDGE = "system_theme_animation_bridge"
         const val KEY_REVISION = "revision"
         const val KEY_ACTIVE_ARCHIVE_PATH = "active_archive_path"
         const val KEY_PENDING_ARCHIVE_UPDATES = "pending_archive_updates"
+        const val KEY_PENDING_ARCHIVE_REMOVALS = "pending_archive_removals"
+        // Retired preference; removed on write so old snapshots cannot resurrect it.
+        const val KEY_SYSTEM_THEME_ANIMATION_BRIDGE = "system_theme_animation_bridge"
         const val KEY_UI_MODE = "ui_mode"
         const val KEY_COLOR_MODE = "color_mode"
         const val KEY_PURE_BLACK_DARK_THEME = "pure_black_dark_theme"

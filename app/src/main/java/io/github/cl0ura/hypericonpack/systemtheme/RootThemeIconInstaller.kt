@@ -1,6 +1,6 @@
 package io.github.cl0ura.hypericonpack.systemtheme
 
-import io.github.cl0ura.hypericonpack.ui.RootAccess
+import io.github.cl0ura.hypericonpack.root.RootAccess
 import java.io.File
 
 /**
@@ -54,7 +54,11 @@ internal object RootThemeIconInstaller {
         return Result(probe.success, probe.output)
     }
 
-    fun install(archive: File): Result {
+    fun install(archive: File): Result = ThemeArchiveMutationGate.withLock {
+        installLocked(archive)
+    }
+
+    private fun installLocked(archive: File): Result {
         if (!archive.isFile || archive.length() == 0L) {
             return Result(false, "未找到已验证的主题归档，请先执行“转换为 HyperOS 主题资源”。")
         }
@@ -92,7 +96,11 @@ internal object RootThemeIconInstaller {
      * deletion: if the current icons archive no longer matches our marker, the
      * operation stops without changing anything.
      */
-    fun restore(): Result {
+    fun restore(): Result = ThemeArchiveMutationGate.withLock {
+        restoreLocked()
+    }
+
+    private fun restoreLocked(): Result {
         val preflight = preflight()
         if (!preflight.success) return preflight
         val result = RootAccess.runFixed(RESTORE_COMMAND, timeoutSeconds = 30L)
@@ -107,7 +115,11 @@ internal object RootThemeIconInstaller {
      * exactly the archive installed by this module.  The check deliberately
      * uses the Root-owned hash marker instead of trusting a stale UI flag.
      */
-    fun status(): Result {
+    fun status(): Result = ThemeArchiveMutationGate.withLock {
+        statusLocked()
+    }
+
+    private fun statusLocked(): Result {
         val preflight = preflight()
         if (!preflight.success) return preflight
         val result = RootAccess.runFixed(STATUS_COMMAND, timeoutSeconds = 30L)

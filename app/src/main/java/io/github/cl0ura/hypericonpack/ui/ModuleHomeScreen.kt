@@ -1,5 +1,7 @@
 package io.github.cl0ura.hypericonpack.ui
 
+import io.github.cl0ura.hypericonpack.root.RootAccess
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +34,7 @@ import io.github.cl0ura.hypericonpack.BuildConfig
 import io.github.cl0ura.hypericonpack.config.IconPackConfig
 import io.github.cl0ura.hypericonpack.config.IconSettingsStore
 import io.github.cl0ura.hypericonpack.systemtheme.HyperOsIconArchiveConverter
+import io.github.cl0ura.hypericonpack.systemtheme.IconArchiveInfo
 import io.github.cl0ura.hypericonpack.systemtheme.ManagedThemeStateReconciler
 import io.github.cl0ura.hypericonpack.systemtheme.RootThemeIconInstaller
 import io.github.cl0ura.hypericonpack.xposed.XposedServiceBridge
@@ -312,7 +315,7 @@ private fun HomeStatusRow(title: String, value: String, ready: Boolean) {
 
 private data class ModuleStatusSnapshot(
     val config: IconPackConfig,
-    val archive: HyperOsIconArchiveConverter.ExistingArchiveInfo?,
+    val archive: IconArchiveInfo?,
     val root: RootAccess.Result,
     val theme: RootThemeIconInstaller.Result?,
     val sourceName: String,

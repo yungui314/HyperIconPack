@@ -23,6 +23,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -80,6 +82,20 @@ internal object IconArchiveConversionController {
     internal fun publish(state: IconArchiveConversionState) {
         mutableState.value = state
     }
+
+    fun cancel(context: Context) {
+        val running = mutableState.value as? IconArchiveConversionState.Running ?: return
+        // Regular startService: the conversion FGS is already running and only
+        // needs an onStartCommand cancel signal without another startForeground.
+        runCatching {
+            context.applicationContext.startService(
+                IconArchiveConversionService.cancelIntent(context.applicationContext),
+            )
+        }.onFailure { throwable ->
+            AppLog.warning(context, "Unable to deliver conversion cancel", throwable)
+        }
+        AppLog.info(context, "Conversion cancel requested: ${running.request.sourceLabel}")
+    }
 }
 
 class IconArchiveConversionService : Service() {
@@ -97,6 +113,15 @@ class IconArchiveConversionService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_CANCEL) {
+            val running = IconArchiveConversionController.state.value as? IconArchiveConversionState.Running
+            if (running != null) {
+                AppLog.info(this, "Conversion cancel requested: ${running.request.sourceLabel}")
+            }
+            // Cooperative cancel: convert() polls isActive via isCancelled.
+            conversionJob?.cancel(CancellationException("已取消转换"))
+            return START_NOT_STICKY
+        }
         val request = intent?.toRequest()
         if (request == null) {
             stopSelf(startId)
@@ -111,6 +136,7 @@ class IconArchiveConversionService : Service() {
 
         conversionJob = serviceScope.launch {
             val result = runCatching {
+                ThemeArchiveMutationGate.withLock {
                 HyperOsIconArchiveConverter.convert(
                     context = applicationContext,
                     iconPackPackage = request.iconPackPackage,
@@ -119,7 +145,6 @@ class IconArchiveConversionService : Service() {
                     monetCustomColors = request.monetCustomColors,
                     monetBackgroundColor = request.monetBackgroundColor,
                     monetForegroundColor = request.monetForegroundColor,
-                    includeInstalledAppFallbacks = true,
                     onProgress = { progress ->
                         val state = IconArchiveConversionState.Running(request, progress)
                         IconArchiveConversionController.publish(state)
@@ -130,7 +155,9 @@ class IconArchiveConversionService : Service() {
                             notificationManager.notify(NOTIFICATION_ID, buildNotification(state))
                         }
                     },
+                    isCancelled = { !isActive },
                 )
+                }
             }
 
             result.fold(
@@ -148,7 +175,11 @@ class IconArchiveConversionService : Service() {
                     )
                 },
                 onFailure = { throwable ->
-                    val message = throwable.message ?: throwable.javaClass.simpleName
+                    val message = when (throwable) {
+                        is ConversionCancelledException -> throwable.message ?: "已取消转换"
+                        is kotlinx.coroutines.CancellationException -> "已取消转换"
+                        else -> throwable.message ?: throwable.javaClass.simpleName
+                    }
                     val state = IconArchiveConversionState.Failed(request, message)
                     IconArchiveConversionController.publish(state)
                     notificationManager.notify(NOTIFICATION_ID, buildNotification(state))
@@ -247,6 +278,19 @@ class IconArchiveConversionService : Service() {
 
         if (state is IconArchiveConversionState.Running) {
             builder.setProgress(100, progress, indeterminate)
+            val cancelIntent = PendingIntent.getService(
+                this,
+                NOTIFICATION_ID + 1,
+                cancelIntent(this),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            builder.addAction(
+                Notification.Action.Builder(
+                    null,
+                    "取消",
+                    cancelIntent,
+                ).build(),
+            )
         }
 
         val notification = builder.build()
@@ -404,6 +448,7 @@ class IconArchiveConversionService : Service() {
     companion object {
         private const val CHANNEL_ID = "icon_archive_conversion"
         private const val NOTIFICATION_ID = 3917
+        private const val ACTION_CANCEL = "io.github.cl0ura.hypericonpack.action.CANCEL_CONVERSION"
         private const val ISLAND_RUNNING_COLOR = "#006EFF"
         private const val ISLAND_SUCCESS_COLOR = "#1A7F37"
         private const val ISLAND_FAILED_COLOR = "#D93025"
@@ -428,6 +473,9 @@ class IconArchiveConversionService : Service() {
                 putExtra(EXTRA_BACKGROUND, request.monetBackgroundColor)
                 putExtra(EXTRA_FOREGROUND, request.monetForegroundColor)
             }
+
+        internal fun cancelIntent(context: Context): Intent =
+            Intent(context, IconArchiveConversionService::class.java).setAction(ACTION_CANCEL)
 
         private fun Intent.toRequest(): IconArchiveConversionRequest? {
             val iconPackPackage = getStringExtra(EXTRA_PACKAGE)?.takeIf { it.isNotBlank() } ?: return null

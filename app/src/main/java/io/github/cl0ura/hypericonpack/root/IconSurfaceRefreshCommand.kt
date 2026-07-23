@@ -1,4 +1,4 @@
-package io.github.cl0ura.hypericonpack.ui
+package io.github.cl0ura.hypericonpack.root
 
 /**
  * Official HyperOS icon refresh path used by Theme Manager.

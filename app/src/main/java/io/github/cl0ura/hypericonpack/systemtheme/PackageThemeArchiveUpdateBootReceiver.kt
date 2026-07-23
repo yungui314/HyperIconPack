@@ -7,9 +7,9 @@ import io.github.cl0ura.hypericonpack.config.IconSettingsStore
 import io.github.cl0ura.hypericonpack.logging.AppLog
 
 /**
- * After reboot, re-schedule any durable package-archive update work that was
- * queued before power-off. The queue itself lives in SharedPreferences, so this
- * receiver only needs to wake JobScheduler when the managed theme is still active.
+ * After reboot, re-schedule any durable package-archive work that was queued
+ * before power-off. The queues live in SharedPreferences, so this receiver only
+ * needs to wake JobScheduler when the managed theme is still active.
  */
 class PackageThemeArchiveUpdateBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
@@ -17,14 +17,20 @@ class PackageThemeArchiveUpdateBootReceiver : BroadcastReceiver() {
         val appContext = context.applicationContext
         val settings = IconSettingsStore(appContext)
         val config = settings.read()
-        val pending = settings.pendingThemeArchivePackageUpdates()
-        if (!config.systemThemeActive || config.packageName == null || pending.isEmpty()) {
+        val pendingAdds = settings.pendingThemeArchivePackageUpdates()
+        val pendingRemoves = settings.pendingThemeArchivePackageRemovals()
+        if (
+            !config.systemThemeActive ||
+            config.packageName == null ||
+            (pendingAdds.isEmpty() && pendingRemoves.isEmpty())
+        ) {
             return
         }
         val scheduled = PackageThemeArchiveUpdateScheduler.schedule(appContext)
         AppLog.info(
             appContext,
-            "BOOT_COMPLETED re-scheduled ${pending.size} pending package archive update(s) (scheduled=$scheduled)",
+            "BOOT_COMPLETED re-scheduled package archive work " +
+                "adds=${pendingAdds.size} removes=${pendingRemoves.size} (scheduled=$scheduled)",
         )
     }
 }

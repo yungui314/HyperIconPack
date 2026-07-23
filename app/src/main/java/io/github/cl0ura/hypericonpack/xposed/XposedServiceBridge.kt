@@ -165,22 +165,23 @@ object XposedServiceBridge : XposedServiceHelper.OnServiceListener {
 
     private fun publishToService(service: XposedService, config: IconPackConfig) {
         runCatching {
+            // Only ownership state is published. Runtime hooks read native
+            // theme state directly and do not depend on cross-process icon
+            // configuration.
             val preferences = service.getRemotePreferences(IconRemoteConfig.GROUP)
             preferences.edit()
                 .apply {
                     config.packageName?.let { putString(IconRemoteConfig.KEY_PACKAGE_NAME, it) }
                         ?: remove(IconRemoteConfig.KEY_PACKAGE_NAME)
-                    putFloat(IconRemoteConfig.KEY_FALLBACK_SCALE, config.fallbackScaleMultiplier)
-                    putBoolean(IconRemoteConfig.KEY_GLOBAL_MONET_ICONS, config.globalMonetIcons)
-                    putBoolean(IconRemoteConfig.KEY_MONET_CUSTOM_COLORS, config.monetCustomColors)
-                    putInt(IconRemoteConfig.KEY_MONET_BACKGROUND_COLOR, config.monetBackgroundColor)
-                    putInt(IconRemoteConfig.KEY_MONET_FOREGROUND_COLOR, config.monetForegroundColor)
                     putBoolean(IconRemoteConfig.KEY_SYSTEM_THEME_ACTIVE, config.systemThemeActive)
-                    putBoolean(
-                        IconRemoteConfig.KEY_SYSTEM_THEME_ANIMATION_BRIDGE,
-                        false,
-                    )
                     putLong(IconRemoteConfig.KEY_REVISION, config.revision)
+                    // Drop retired remote keys so hot-reload cannot revive them.
+                    remove("fallback_scale")
+                    remove("global_monet_icons")
+                    remove("monet_custom_colors")
+                    remove("monet_background_color")
+                    remove("monet_foreground_color")
+                    remove("system_theme_animation_bridge")
                 }
                 .apply()
         }.onFailure { throwable ->
@@ -198,7 +199,6 @@ object XposedServiceBridge : XposedServiceHelper.OnServiceListener {
     }
 
     private val STATIC_SCOPE = setOf(
-        "com.miui.home",
         // LSPosed maps system_server to the synthetic "system" package, not "android".
         "system",
     )

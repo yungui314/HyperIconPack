@@ -15,7 +15,28 @@ internal data class GlobalMonetPalette(
     val outerContainer: Int,
     val lightTone: Int,
     val darkTone: Int,
-)
+) {
+    val cacheFingerprint: String
+        get() = listOf(outerContainer, lightTone, darkTone)
+            .joinToString(":") { color -> color.toUInt().toString(16) }
+}
+
+internal fun currentMonetPaletteFingerprint(
+    context: Context,
+    globalMonetIcons: Boolean,
+    monetCustomColors: Boolean,
+    monetBackgroundColor: Int,
+    monetForegroundColor: Int,
+): String = if (globalMonetIcons) {
+    SystemMonetIconPalette.global(
+        context = context,
+        useCustomColors = monetCustomColors,
+        backgroundColor = monetBackgroundColor,
+        foregroundColor = monetForegroundColor,
+    ).cacheFingerprint
+} else {
+    ""
+}
 
 /** Reads Android's wallpaper-derived Accent 1 palette once for a conversion. */
 internal object SystemMonetIconPalette {
@@ -26,11 +47,11 @@ internal object SystemMonetIconPalette {
         foregroundColor: Int = 0xFF4A4458.toInt(),
     ): GlobalMonetPalette {
         if (useCustomColors) {
-            val background = opaque(backgroundColor)
-            val foreground = ensureContrast(background, opaque(foregroundColor))
+            val background = MonetColorMath.opaque(backgroundColor)
+            val foreground = MonetColorMath.ensureContrast(background, MonetColorMath.opaque(foregroundColor))
             return GlobalMonetPalette(
                 outerContainer = background,
-                lightTone = mix(background, foreground, 0.35f),
+                lightTone = MonetColorMath.mix(background, foreground, 0.35f),
                 darkTone = foreground,
             )
         }
@@ -58,32 +79,6 @@ internal object SystemMonetIconPalette {
         }
     }
 
-    private fun opaque(color: Int): Int = color or Color.BLACK
-
-    private fun mix(start: Int, end: Int, amount: Float): Int {
-        fun channel(from: Int, to: Int): Int = (from + (to - from) * amount).roundToInt()
-        return Color.rgb(
-            channel(Color.red(start), Color.red(end)),
-            channel(Color.green(start), Color.green(end)),
-            channel(Color.blue(start), Color.blue(end)),
-        )
-    }
-
-    private fun ensureContrast(background: Int, foreground: Int): Int {
-        if (distance(background, foreground) >= MIN_CUSTOM_CONTRAST_SQUARED) return foreground
-        val black = Color.rgb(24, 24, 24)
-        val white = Color.rgb(244, 244, 244)
-        return if (distance(background, black) >= distance(background, white)) black else white
-    }
-
-    private fun distance(first: Int, second: Int): Int {
-        val red = Color.red(first) - Color.red(second)
-        val green = Color.green(first) - Color.green(second)
-        val blue = Color.blue(first) - Color.blue(second)
-        return red * red + green * green + blue * blue
-    }
-
-    private const val MIN_CUSTOM_CONTRAST_SQUARED = 96 * 96
 }
 
 /**
