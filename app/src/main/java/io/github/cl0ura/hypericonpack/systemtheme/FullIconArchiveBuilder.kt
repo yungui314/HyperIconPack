@@ -39,9 +39,6 @@ internal object FullIconArchiveBuilder {
         val fallbackActivities = catalog.launchableActivities
         val fallbackWorkTotal = fallbackActivities.size + installedApplications.size
         val progressTotal = mappings.size + fallbackWorkTotal
-        val nativeFallbackAssets = pack
-            ?.loadNativeThemeFallback(fallbackScaleMultiplier)
-            ?.let(NativeThemeFallbackWriter::render)
         onProgress?.invoke(
             HyperOsIconArchiveConverter.ConversionProgress(
                 phase = HyperOsIconArchiveConverter.ConversionPhase.EXPLICIT_MAPPINGS,
@@ -61,8 +58,6 @@ internal object FullIconArchiveBuilder {
             monetForegroundColor = monetForegroundColor,
             applicationScopeFingerprint = IconArchiveCache.applicationScopeFingerprint(context),
             monetPaletteFingerprint = palette?.cacheFingerprint.orEmpty(),
-            nativeFallback = nativeFallbackAssets != null,
-            nativeFallbackScale = nativeFallbackAssets?.scale,
         )
         val archive = IconArchiveCache.archiveFile(
             context = context,
@@ -85,16 +80,11 @@ internal object FullIconArchiveBuilder {
             palette = palette,
             isCancelled = isCancelled,
         )
+        val themeFallback = pack?.createXiaomiThemeFallback(fallbackScaleMultiplier)
         AppLog.info(
             context,
             "Conversion scope: apps=${installedApplications.size}, launchers=${fallbackActivities.size}, mappings=${mappings.size}",
         )
-        nativeFallbackAssets?.let { assets ->
-            AppLog.info(
-                context,
-                "Native fallback: scale=${assets.scale}, mask=${assets.maskSource}, pattern=${assets.hasPattern}, border=${assets.hasBorder}",
-            )
-        }
 
         var explicitConverted = 0
         var fallbackConverted = 0
@@ -111,6 +101,13 @@ internal object FullIconArchiveBuilder {
         try {
             ZipOutputStream(BufferedOutputStream(FileOutputStream(temporaryArchive))).use { zip ->
                 zip.setLevel(Deflater.NO_COMPRESSION)
+                IconArchiveFormat.writeMetadata(zip, archiveVariant)
+                IconArchiveFormat.writeTransformConfig(
+                    zip = zip,
+                    fallback = themeFallback,
+                    useDynamicIcon = false,
+                )
+                IconArchiveFormat.writeThemeFallbackAssets(zip, themeFallback)
 
                 fun appendPng(entryName: String, png: ByteArray) {
                     zip.putNextEntry(ZipEntry(entryName))
@@ -119,17 +116,6 @@ internal object FullIconArchiveBuilder {
                     } finally {
                         zip.closeEntry()
                     }
-                }
-
-                IconArchiveFormat.writeMetadata(zip, archiveVariant)
-                IconArchiveFormat.writeTransformConfig(
-                    zip = zip,
-                    useDynamicIcon = false,
-                    nativeFallbackScale = nativeFallbackAssets?.scale,
-                )
-                nativeFallbackAssets?.entries?.forEach { (entryName, png) ->
-                    appendPng(entryName, png)
-                    entryNames.add(entryName)
                 }
 
                 fun recordRenderResult(key: String, result: PngRenderResult) {

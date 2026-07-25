@@ -33,7 +33,7 @@ HyperOS 桌面、文件夹、设置与系统界面
 主要能力：
 
 - 转换标准 `appfilter.xml` 图标包，并为已安装应用生成包级资源。
-- 将 `iconback`、`iconmask`、`iconupon` 与 `scale` 转换为 Xiaomi 原生 `icon_pattern.png`、`icon_mask.png`、`icon_border.png` 和 `ScaleX/ScaleY`，让未映射或之后新安装的应用由 HyperOS 实时合成。
+- 将 `iconback`、`iconmask`、`iconupon` 与 `scale` 转换为 Xiaomi 原生 `icon_pattern.png`、`icon_mask.png`、`icon_border.png`、`ConfigIconMask` 和 `PointsMapping`，让未映射或之后新安装的应用由 HyperOS 实时合成。
 - 可选全局 Monet 转换和自定义 Monet 配色。
 - 转换结果保存为存档，之后切换同一存档无需重新生成。
 - Root 原子安装、完整性校验、自动备份和一键恢复系统原图标。
@@ -43,7 +43,7 @@ HyperOS 桌面、文件夹、设置与系统界面
 - 动态时钟尚未形成可靠的通用转换方案；没有明确且完整的图标包预设时不会强行生成。
 
 > [!IMPORTANT]
-> `v0.9.41` 将标准 appfilter 回退层转换为 HyperOS 原生四图层资源，并移除会让 HyperOS 3 忽略这些资源的全屏 `ConfigIconMask`。归档格式已升级为 31；升级后请重新转换图标包，不要继续应用旧格式存档。
+> `v0.9.41` 将标准 appfilter 回退层转换为 HyperOS 原生通用资源，移除会绕过这些资源的全屏 `ConfigIconMask`，并同步主题商店使用的 `is_default_icon` 系统状态，修复打开应用和返回桌面时图标轮廓短暂闪成圆角矩形的问题。归档格式已升级为 34；升级后请重新转换图标包，不要继续应用旧格式存档。
 
 ## 效果展示
 
@@ -92,13 +92,13 @@ HyperOS 桌面、文件夹、设置与系统界面
 - 模块配置通过 `RemotePreferences` 同步，不再使用旧版跨进程配置方案。
 - `autoHotReload` 用于安装新版 APK 后热重载模块代码，不会重启桌面，也不会替代 HyperOS 官方图标配置刷新。
 - 应用或切换图标存档后，模块会调用官方 `0x8` configuration 刷新；只有设备或主题管理器没有正确响应时，才需要按日志提示手动刷新。
-- `v0.9.41` 将归档格式升级为 31。`v0.9.40` 及更早版本生成的存档需要重新转换；元数据校验会阻止直接应用不兼容的旧资源。
+- `v0.9.41` 将归档格式升级为 34。`v0.9.40` 及更早版本生成的存档需要重新转换；元数据校验会阻止直接应用不兼容的旧资源。
 
 ## 实现边界
 
 - 本项目转换的是应用图标，不是包含字体、状态栏信号、电池、Framework 和 MAML 的完整主题商店主题。
 - SystemUI 通知栏图标由系统自身规则处理；通知内容图片、Wi-Fi、信号、电池等资源不在 `appfilter.xml` 转换范围内。
-- 动态日历资源会嵌入主 `icons` 归档的 `animating_icons` 路径，并关闭系统默认 `dynamicicons/layer_animating_icons` 覆盖，以保留图标包自己的形状和 Monet 效果。图标包若没有完整的动态日历预设，会回退为静态图标。
+- 动态日历资源会嵌入主 `icons` 归档的 `fancy_icons` 路径，并关闭系统默认 `dynamicicons/layer_animating_icons` 覆盖，以保留图标包自己的形状和 Monet 效果。图标包若没有完整的动态日历预设，会回退为静态图标。
 - 动态时钟目前只保留静态图标；图标包若没有经过验证的完整动态时钟预设，不会生成不可靠的系统原生方形时钟。
 - 一个 Xiaomi `icons` 模块只能提供一套通用 fallback 图层；当 appfilter 声明多个 `iconback` 时，转换器使用首个可加载资源。
 - HyperOS 3 没有把系统深浅色状态可靠传递给静态 `icons` 模块，因此暂不把 APK 的 day/night Drawable 打包为同一存档自动切换。转换使用当时解析到的资源；需要双版本时应分别生成并切换存档。

@@ -2,11 +2,9 @@ package io.github.cl0ura.hypericonpack.systemtheme
 
 import java.io.File
 import java.io.FileOutputStream
-import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertThrows
 import org.junit.Test
@@ -24,22 +22,11 @@ class IconArchiveFormatTest {
             monetForegroundColor = 0xFFABCDEF.toInt(),
             applicationScopeFingerprint = "0123456789abcdefghij",
             monetPaletteFingerprint = "ff123456:ff789abc:ffabcdef",
-            nativeFallback = true,
-            nativeFallbackScale = 0.9775f,
         )
         try {
             ZipOutputStream(FileOutputStream(archive)).use { output ->
                 IconArchiveFormat.writeMetadata(output, variant)
-                IconArchiveFormat.writeTransformConfig(
-                    zip = output,
-                    useDynamicIcon = false,
-                    nativeFallbackScale = variant.nativeFallbackScale,
-                )
-                IconArchiveEntryNames.NATIVE_FALLBACK_ENTRIES.forEach { entryName ->
-                    output.putNextEntry(ZipEntry(entryName))
-                    output.write(byteArrayOf(1))
-                    output.closeEntry()
-                }
+                IconArchiveFormat.writeTransformConfig(output, useDynamicIcon = false)
             }
 
             val info = requireNotNull(IconArchiveFormat.readInfo(archive))
@@ -55,17 +42,47 @@ class IconArchiveFormatTest {
             assertEquals(variant.monetForegroundColor, info.monetForegroundColor)
             assertEquals(variant.applicationScopeFingerprint, info.applicationScopeFingerprint)
             assertEquals(variant.monetPaletteFingerprint, info.monetPaletteFingerprint)
-            assertTrue(info.nativeFallback)
-            assertEquals(variant.nativeFallbackScale, info.nativeFallbackScale)
             assertTrue(info.isCurrentFormat)
-            IconArchiveFormat.validate(archive, expectedIconEntries = 0)
             ZipFile(archive).use { zip ->
                 val config = zip.getInputStream(zip.getEntry(IconArchiveFormat.TRANSFORM_CONFIG_ENTRY))
                     .use { it.readBytes().toString(Charsets.UTF_8) }
-                assertTrue(config.contains("<ScaleX value=\"0.9775\" />"))
-                assertTrue(config.contains("<ScaleY value=\"0.9775\" />"))
-                assertFalse(config.contains("ConfigIconMask"))
+                assertTrue(config.contains("name=\"SupportLayerIcon\" value=\"false\""))
+                assertTrue(config.contains("name=\"UseDynamicIcon\" value=\"false\""))
+                assertTrue(config.contains("<PointsMapping>"))
+                assertTrue(config.contains("name=\"ConfigIconMask\""))
+                assertTrue(!config.contains("value=\"M0 0H100V100H0Z\""))
             }
+            IconArchiveFormat.validate(archive, expectedIconEntries = 0)
+        } finally {
+            archive.delete()
+        }
+    }
+
+    @Test
+    fun `generic Xiaomi resources are not counted as application icons`() {
+        val archive = File.createTempFile("hyper-iconpack-generic", ".zip")
+        val variant = IconArchiveVariant(
+            iconPackPackage = "com.example.icons",
+            fallbackScaleMultiplier = 1f,
+            globalMonetIcons = false,
+            monetCustomColors = false,
+            monetBackgroundColor = 0,
+            monetForegroundColor = 0,
+            applicationScopeFingerprint = "apps",
+            monetPaletteFingerprint = "",
+        )
+        try {
+            ZipOutputStream(FileOutputStream(archive)).use { output ->
+                IconArchiveFormat.writeMetadata(output, variant)
+                IconArchiveFormat.writeTransformConfig(output)
+                output.putNextEntry(java.util.zip.ZipEntry(IconArchiveEntryNames.GENERIC_MASK_ENTRY))
+                output.write(byteArrayOf(1, 2, 3))
+                output.closeEntry()
+                output.putNextEntry(java.util.zip.ZipEntry("res/drawable-xxhdpi/com.example.app.png"))
+                output.write(byteArrayOf(4, 5, 6))
+                output.closeEntry()
+            }
+            IconArchiveFormat.validate(archive, expectedIconEntries = 1)
         } finally {
             archive.delete()
         }

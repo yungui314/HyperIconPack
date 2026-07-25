@@ -5,15 +5,18 @@ import io.github.cl0ura.hypericonpack.iconpack.ParsedIconPack
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.util.Calendar
 import java.util.zip.Deflater
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
 internal object DynamicCalendarArchive {
-    private const val DYNAMIC_ICON_SIZE_PX = 256
+    // Static theme PNGs are rendered on a 256px canvas.  MAML scales an
+    // image by its intrinsic pixel size when no w/h is supplied, so using a
+    // 192px manifest with 256px frames makes calendar icons visibly larger.
+    private const val DYNAMIC_ICON_SIZE_PX = IconPngRenderer.RENDER_SIZE_PX
 
+    @Suppress("UNUSED_PARAMETER")
     fun generate(
         pack: ParsedIconPack?,
         installedPackageNames: Set<String>,
@@ -35,7 +38,6 @@ internal object DynamicCalendarArchive {
             deleteSidecar(destination)
             return null
         }
-        val launchableByPackage = launchableComponents.groupBy({ it.packageName }, { it })
         val temporary = File(destination.parentFile, "${destination.name}.new")
         var convertedTrees = 0
         try {
@@ -71,33 +73,16 @@ internal object DynamicCalendarArchive {
                                 .orEmpty()
                         }
                         if (renderedDays.size != 31) return@forEach
-                        val relativeNames = LinkedHashSet<String>()
-                        relativeNames += packageName
-                        mappings.forEach { mapping ->
-                            relativeNames += lookupName(
-                                packageName = mapping.component.packageName,
-                                className = mapping.component.className,
-                            )
-                        }
-                        launchableByPackage[packageName].orEmpty().forEach { component ->
-                            relativeNames += lookupName(component.packageName, component.className)
-                        }
-                        val currentDay = Calendar.getInstance()
-                            .get(Calendar.DAY_OF_MONTH)
-                            .coerceIn(1, 31)
-                        val quiet = renderedDays[currentDay - 1]
-                        relativeNames.forEach { relativeName ->
+                        // Pure-style fancy_icons only need the package root.
+                        // Activity aliases fall back to the package tree.
+                        if (!writtenRoots.add(packageName)) return@forEach
+                        val packageRoot = "${IconArchiveEntryNames.DYNAMIC_ROOT_DIRECTORY}/$packageName"
+                        appendText(zip, "$packageRoot/manifest.xml", manifest())
+                        renderedDays.forEachIndexed { index, bytes ->
                             checkCancelled(isCancelled)
-                            if (!writtenRoots.add(relativeName)) return@forEach
-                            val packageRoot = "${IconArchiveEntryNames.DYNAMIC_ROOT_DIRECTORY}/$relativeName"
-                            appendText(zip, "$packageRoot/fancy/manifest.xml", manifest())
-                            renderedDays.forEachIndexed { index, bytes ->
-                                checkCancelled(isCancelled)
-                                appendBytes(zip, "$packageRoot/fancy/day_${index + 1}.png", bytes)
-                            }
-                            appendBytes(zip, "$packageRoot/quiet/quietImage.png", quiet)
-                            convertedTrees++
+                            appendBytes(zip, "$packageRoot/calendar_icon_${index + 1}.png", bytes)
                         }
+                        convertedTrees++
                     }
             }
             if (convertedTrees == 0) {
@@ -106,7 +91,7 @@ internal object DynamicCalendarArchive {
                 return null
             }
             ZipFile(temporary).use { zip ->
-                require(zip.entries().asSequence().any { it.name.endsWith("/fancy/manifest.xml") }) {
+                require(zip.entries().asSequence().any { it.name.endsWith("/manifest.xml") && it.name.startsWith("${IconArchiveEntryNames.DYNAMIC_ROOT_DIRECTORY}/") }) {
                     "HyperOS 动态日历归档校验失败"
                 }
             }
@@ -130,26 +115,15 @@ internal object DynamicCalendarArchive {
         }
         if (dynamicArchive == null && !hasEmbeddedEntries) return
 
-        val nativeFallbackScale = IconArchiveFormat.readInfo(iconArchive)
-            ?.takeIf(IconArchiveInfo::nativeFallback)
-            ?.nativeFallbackScale
         val temporary = File(iconArchive.parentFile, "${iconArchive.name}.embed-dynamic.new")
         try {
             ZipFile(iconArchive).use { icons ->
                 ZipOutputStream(BufferedOutputStream(FileOutputStream(temporary))).use { output ->
                     output.setLevel(Deflater.NO_COMPRESSION)
-                    IconArchiveFormat.writeTransformConfig(
-                        zip = output,
-                        useDynamicIcon = false,
-                        nativeFallbackScale = nativeFallbackScale,
-                    )
                     val written = HashSet<String>()
                     icons.entries().asSequence().forEach { entry ->
                         checkCancelled(isCancelled)
-                        if (
-                            entry.name == IconArchiveFormat.TRANSFORM_CONFIG_ENTRY ||
-                            isDynamicEntry(entry.name)
-                        ) {
+                        if (isDynamicEntry(entry.name)) {
                             return@forEach
                         }
                         copyEntry(icons, entry, output, written)
@@ -218,16 +192,12 @@ internal object DynamicCalendarArchive {
 
     private fun manifest(): String = """
         <?xml version="1.0" encoding="utf-8"?>
-        <Icon version="1" frameRate="0" width="$DYNAMIC_ICON_SIZE_PX" height="$DYNAMIC_ICON_SIZE_PX" screenWidth="1080" useVariableUpdater="DateTime.Day">
-            <ExternalCommands>
-                <Trigger action="resume">
-                    <FrameRateCommand rate="5" />
-                    <FrameRateCommand rate="0" delay="10" />
-                </Trigger>
-                <Trigger action="back_home_start"><FrameRateCommand rate="60" /></Trigger>
-                <Trigger action="back_home_finish"><FrameRateCommand rate="0" delay="1000" /></Trigger>
-            </ExternalCommands>
-            <Image x="$DYNAMIC_ICON_SIZE_PX/2" y="$DYNAMIC_ICON_SIZE_PX/2" align="center" alignV="center" src="day.png" srcid="#date" />
+        <Icon version="1" frameRate="0" width="$DYNAMIC_ICON_SIZE_PX" height="$DYNAMIC_ICON_SIZE_PX" resDensity="480" useVariableUpdater="DateTime.Second">
+            <VariableBinders>
+                <BroadcastBinder action="android.intent.action.TIME_SET" />
+                <BroadcastBinder action="android.intent.action.DATE_CHANGED" />
+            </VariableBinders>
+            <Image x="${DYNAMIC_ICON_SIZE_PX / 2}" y="${DYNAMIC_ICON_SIZE_PX / 2}" align="center" alignV="center" src="calendar_icon.png" srcid="#date" />
         </Icon>
     """.trimIndent()
 

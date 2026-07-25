@@ -69,8 +69,6 @@ internal object PackageArchiveMutator {
             monetForegroundColor = monetForegroundColor,
             applicationScopeFingerprint = IconArchiveCache.applicationScopeFingerprint(context),
             monetPaletteFingerprint = monetPaletteFingerprint,
-            nativeFallback = baseInfo.nativeFallback,
-            nativeFallbackScale = baseInfo.nativeFallbackScale,
         )
         val destination = IconArchiveCache.archiveFile(context, variant, createDirectory = true)
         val temporary = File(destination.parentFile, "${destination.name}.package-update")
@@ -131,8 +129,6 @@ internal object PackageArchiveMutator {
             monetForegroundColor = baseInfo.monetForegroundColor,
             applicationScopeFingerprint = IconArchiveCache.applicationScopeFingerprint(context),
             monetPaletteFingerprint = monetPaletteFingerprint,
-            nativeFallback = baseInfo.nativeFallback,
-            nativeFallbackScale = baseInfo.nativeFallbackScale,
         )
         val destination = IconArchiveCache.archiveFile(context, variant, createDirectory = true)
         val temporary = File(destination.parentFile, "${destination.name}.package-remove")
@@ -216,15 +212,9 @@ internal object PackageArchiveMutator {
             ZipOutputStream(BufferedOutputStream(FileOutputStream(temporary))).use { output ->
                 output.setLevel(Deflater.NO_COMPRESSION)
                 IconArchiveFormat.writeMetadata(output, variant)
-                IconArchiveFormat.writeTransformConfig(
-                    zip = output,
-                    useDynamicIcon = false,
-                    nativeFallbackScale = variant.nativeFallbackScale.takeIf { variant.nativeFallback },
-                )
                 input.entries().asSequence().forEach { entry ->
                     if (
                         entry.name == IconArchiveFormat.METADATA_ENTRY ||
-                        entry.name == IconArchiveFormat.TRANSFORM_CONFIG_ENTRY ||
                         skip(entry.name)
                     ) {
                         return@forEach

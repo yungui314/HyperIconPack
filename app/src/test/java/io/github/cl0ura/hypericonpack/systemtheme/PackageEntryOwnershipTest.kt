@@ -36,13 +36,13 @@ class PackageEntryOwnershipTest {
     fun `dynamic calendar tree matches package root`() {
         assertTrue(
             IconArchiveEntryNames.entryBelongsToPackage(
-                "animating_icons/com.example.app/fancy/manifest.xml",
+                "fancy_icons/com.example.app/manifest.xml",
                 "com.example.app",
             ),
         )
         assertTrue(
             IconArchiveEntryNames.entryBelongsToPackage(
-                "animating_icons/com.example.app.MainActivity/quiet/quietImage.png",
+                "fancy_icons/com.example.app.MainActivity/manifest.xml",
                 "com.example.app",
             ),
         )
@@ -58,7 +58,7 @@ class PackageEntryOwnershipTest {
         )
         assertFalse(
             IconArchiveEntryNames.entryBelongsToPackage(
-                "animating_icons/com.example.appx/fancy/manifest.xml",
+                "fancy_icons/com.example.appx/manifest.xml",
                 "com.example.app",
             ),
         )

@@ -15,8 +15,9 @@ import java.util.zip.ZipFile
  * HyperOS opens /data/system/theme/icons as a normal ZIP and asks it for
  * entries such as:
  *
+ *   res/drawable-xxhdpi/com.example.png
  *   res/drawable-xxhdpi/com.example.MainActivity.png
- *   res/drawable-xxhdpi/com.example#ExternalActivity.png
+ *   fancy_icons/com.android.calendar/manifest.xml
  *
  * The archive is intentionally generated before any Root operation.  This
  * keeps conversion inspectable and makes installation a separate, reversible
@@ -27,11 +28,9 @@ internal object HyperOsIconArchiveConverter {
     const val ORIGINAL_ICON_LABEL = "本机原始图标"
 
     /**
-     * The current format retains the icon pack's complete appfilter contract, then
-     * adds precise resources for desktop-launchable components and every
-     * installed package.  This deliberately avoids baking thousands of
-     * internal Activities into one archive: HyperOS can stop resolving icons
-     * reliably when its private theme ZIP grows excessively large.  For
+     * The current format retains the icon pack's complete appfilter contract,
+     * adds precise resources for every launcher component and installed
+     * package, and embeds optional fancy_icons trees. For
      * Global Monet, an application's API 33+ native monochrome layer is used
      * only when the selected icon pack has no usable mapping for that app.
      */

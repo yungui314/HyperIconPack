@@ -56,15 +56,15 @@ class DynamicCalendarArchiveTest {
                 mapOf(
                     IconArchiveFormat.TRANSFORM_CONFIG_ENTRY to "old-config".toByteArray(),
                     "res/drawable-xxhdpi/com.example.calendar.png" to byteArrayOf(1),
-                    "animating_icons/com.example.calendar/fancy/manifest.xml" to "old".toByteArray(),
-                    "animating_icons/com.example.stale/fancy/manifest.xml" to "stale".toByteArray(),
+                    "fancy_icons/com.example.calendar/manifest.xml" to "old".toByteArray(),
+                    "fancy_icons/com.example.stale/manifest.xml" to "stale".toByteArray(),
                 ),
             )
             writeArchive(
                 dynamic,
                 mapOf(
-                    "animating_icons/com.example.calendar/fancy/manifest.xml" to "new".toByteArray(),
-                    "animating_icons/com.example.calendar/fancy/day_1.png" to byteArrayOf(2),
+                    "fancy_icons/com.example.calendar/manifest.xml" to "new".toByteArray(),
+                    "fancy_icons/com.example.calendar/calendar_icon_1.png" to byteArrayOf(2),
                 ),
             )
 
@@ -73,10 +73,10 @@ class DynamicCalendarArchiveTest {
             ZipFile(icons).use { zip ->
                 assertArrayEquals(
                     "new".toByteArray(),
-                    zip.getInputStream(zip.getEntry("animating_icons/com.example.calendar/fancy/manifest.xml"))
+                    zip.getInputStream(zip.getEntry("fancy_icons/com.example.calendar/manifest.xml"))
                         .use { it.readBytes() },
                 )
-                assertNull(zip.getEntry("animating_icons/com.example.stale/fancy/manifest.xml"))
+                assertNull(zip.getEntry("fancy_icons/com.example.stale/manifest.xml"))
                 assertArrayEquals(
                     byteArrayOf(1),
                     zip.getInputStream(zip.getEntry("res/drawable-xxhdpi/com.example.calendar.png"))

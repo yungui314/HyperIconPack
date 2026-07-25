@@ -6,23 +6,33 @@ import android.content.ComponentName
  * Pure HyperOS theme ZIP entry-name rules shared by full conversion and
  * incremental package add/remove. Kept free of Android Context so ownership
  * matching can be unit-tested without a device.
+ *
+ * Static resources retain complete package and component coverage. Optional
+ * fancy_icons/<package>/ trees provide dynamic calendar resources.
  */
 internal object IconArchiveEntryNames {
     const val TARGET_DENSITY_DIRECTORY = "res/drawable-xxhdpi"
-    const val DYNAMIC_ROOT_DIRECTORY = "animating_icons"
-    const val ICON_MASK_ENTRY = "$TARGET_DENSITY_DIRECTORY/icon_mask.png"
-    const val ICON_BACKGROUND_ENTRY = "$TARGET_DENSITY_DIRECTORY/icon_background.png"
-    const val ICON_PATTERN_ENTRY = "$TARGET_DENSITY_DIRECTORY/icon_pattern.png"
-    const val ICON_BORDER_ENTRY = "$TARGET_DENSITY_DIRECTORY/icon_border.png"
-
-    val NATIVE_FALLBACK_ENTRIES: Set<String> = setOf(
-        ICON_MASK_ENTRY,
-        ICON_BACKGROUND_ENTRY,
-        ICON_PATTERN_ENTRY,
-        ICON_BORDER_ENTRY,
+    const val DYNAMIC_ROOT_DIRECTORY = "fancy_icons"
+    const val GENERIC_MASK_ENTRY = "$TARGET_DENSITY_DIRECTORY/icon_mask.png"
+    const val GENERIC_BACKGROUND_ENTRY = "$TARGET_DENSITY_DIRECTORY/icon_background.png"
+    const val GENERIC_PATTERN_ENTRY = "$TARGET_DENSITY_DIRECTORY/icon_pattern.png"
+    const val GENERIC_BORDER_ENTRY = "$TARGET_DENSITY_DIRECTORY/icon_border.png"
+    val GENERIC_THEME_ENTRIES = setOf(
+        GENERIC_MASK_ENTRY,
+        GENERIC_BACKGROUND_ENTRY,
+        GENERIC_PATTERN_ENTRY,
+        GENERIC_BORDER_ENTRY,
     )
 
-    fun isNativeFallbackEntry(entryName: String): Boolean = entryName in NATIVE_FALLBACK_ENTRIES
+    // Compatibility names retained for diagnostics from the earlier native
+    // fallback exporter. The format-34 writer uses the GENERIC_* names above.
+    const val ICON_MASK_ENTRY = GENERIC_MASK_ENTRY
+    const val ICON_BACKGROUND_ENTRY = GENERIC_BACKGROUND_ENTRY
+    const val ICON_PATTERN_ENTRY = GENERIC_PATTERN_ENTRY
+    const val ICON_BORDER_ENTRY = GENERIC_BORDER_ENTRY
+    val NATIVE_FALLBACK_ENTRIES: Set<String> = GENERIC_THEME_ENTRIES
+
+    fun isNativeFallbackEntry(entryName: String): Boolean = entryName in GENERIC_THEME_ENTRIES
 
     fun archiveEntryName(component: ComponentName): String {
         // ZIP entry names are case-sensitive. HyperOS passes the installed
@@ -42,7 +52,7 @@ internal object IconArchiveEntryNames {
         "$TARGET_DENSITY_DIRECTORY/$packageName.png"
 
     fun entryBelongsToPackage(entryName: String, packageName: String): Boolean {
-        if (isNativeFallbackEntry(entryName)) return false
+        if (entryName in GENERIC_THEME_ENTRIES) return false
         val iconPrefix = "$TARGET_DENSITY_DIRECTORY/"
         if (entryName.startsWith(iconPrefix)) {
             val leaf = entryName.removePrefix(iconPrefix)

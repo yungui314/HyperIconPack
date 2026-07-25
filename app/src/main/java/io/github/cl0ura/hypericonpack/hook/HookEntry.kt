@@ -103,22 +103,23 @@ class HookEntry : XposedModule() {
             var hooksInstalled = 0
             for (method in targets) {
                 hook(method).intercept { chain ->
-                    val candidate = resolveCandidatePath(chain)
-                    val managed = isManagedThemeMarkerPresent()
+                    val candidate = resolveCandidateFile(chain)
+                    val candidatePath = candidate?.let(::canonicalPath).orEmpty()
+                    val managed = candidate?.let(DrmProtectionPolicy::isManagedIconArchive) == true
                     if (
                         DrmProtectionPolicy.shouldBypass(
-                            contentPath = candidate,
-                            managedThemeMarkerPresent = managed,
+                            contentPath = candidatePath,
+                            managedArchive = managed,
                         )
                     ) {
                         return@intercept drmSuccess
                     }
-                    if (!managed && DrmProtectionPolicy.isProtectedThemePath(candidate)) {
+                    if (!managed && DrmProtectionPolicy.isProtectedThemePath(candidatePath)) {
                         log(
                             Log.WARN,
                             TAG,
-                            "DRM checked $candidate but managed marker is unreadable; " +
-                                "icons may be deleted. Check .runtime permissions/SELinux.",
+                            "DRM checked $candidatePath but Hyper Icon Pack metadata was not found; " +
+                                "delegating to Xiaomi validation",
                         )
                     }
                     chain.proceed()
@@ -148,16 +149,17 @@ class HookEntry : XposedModule() {
      * overloads only receive the SHA-1 and cannot be mapped back to a path, so
      * they fall through to the original implementation.
      */
-    private fun resolveCandidatePath(chain: io.github.libxposed.api.XposedInterface.Chain): String {
+    private fun resolveCandidateFile(
+        chain: io.github.libxposed.api.XposedInterface.Chain,
+    ): File? {
         return when (val second = chain.args.getOrNull(1)) {
-            is File -> runCatching { second.canonicalPath }.getOrElse { second.absolutePath }
-            else -> ""
+            is File -> second
+            else -> null
         }
     }
 
-    private fun isManagedThemeMarkerPresent(): Boolean {
-        return MANAGED_MARKER_CANDIDATES.any { path -> File(path).isFile }
-    }
+    private fun canonicalPath(file: File): String =
+        runCatching { file.canonicalPath }.getOrElse { file.absolutePath }
 
     private fun resolveDrmClassLoader(preferred: ClassLoader?): ClassLoader? {
         preferred?.let { classLoader ->
@@ -187,13 +189,5 @@ class HookEntry : XposedModule() {
 
     private companion object {
         const val TAG = "HyperIconPack"
-
-        // Prefer the DRM-whitelist .runtime location.  Keep the legacy marker
-        // path as a one-release fallback so already-installed themes stay
-        // protected until the next apply migrates the marker.
-        private val MANAGED_MARKER_CANDIDATES = listOf(
-            "/data/system/theme/.runtime/hypericonpack/icons.sha256",
-            "/data/system/theme/.hypericonpack-icons.sha256",
-        )
     }
 }

@@ -5,12 +5,15 @@ import android.content.Context
 import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.PorterDuff
 import android.graphics.Rect
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.util.Xml
 import io.github.cl0ura.hypericonpack.systemtheme.SystemIconShapeDrawable
 import org.xmlpull.v1.XmlPullParser
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -47,6 +50,33 @@ internal class ParsedIconPack private constructor(
                     declaredScale = style.scale,
                 )
             }
+
+    /**
+     * Converts the launcher's appfilter fallback stack into the resources
+     * consumed by MIUI/HyperOS IconCustomizer for apps absent from the theme.
+     */
+    fun createXiaomiThemeFallback(scaleMultiplier: Float): XiaomiThemeFallback? {
+        val style = fallbackStyle ?: return null
+        val background = style.backgroundNames.firstNotNullOfOrNull(::loadDrawable)
+        val declaredMask = style.maskName?.let(::loadDrawable)
+        val shapeSource = declaredMask ?: background ?: return null
+        val renderedShape = renderDrawable(shapeSource)
+        val inverseMask = declaredMask != null && isInverseMask(renderedShape)
+        val normalizedMask = normalizeMask(renderedShape, inverseMask)
+        val path = createMaskPath(normalizedMask)
+        val pattern = background?.let(::renderDrawableToPng)
+        val border = style.foregroundName?.let(::loadDrawable)?.let(::renderDrawableToPng)
+        val result = XiaomiThemeFallback(
+            maskPng = normalizedMask.toPng(),
+            patternPng = pattern,
+            borderPng = border,
+            configIconMask = path,
+            sourceScale = (style.scale * scaleMultiplier).coerceIn(MIN_FALLBACK_SCALE, MAX_FALLBACK_SCALE),
+        )
+        renderedShape.recycle()
+        normalizedMask.recycle()
+        return result
+    }
 
     private val resources: Resources = packageContext.resources
     private val constantStates = ConcurrentHashMap<String, Drawable.ConstantState>()
@@ -314,6 +344,106 @@ internal class ParsedIconPack private constructor(
             ?: resources.getIdentifier(name, "mipmap", packageContext.packageName)
     }
 
+    private fun renderDrawable(drawable: Drawable): Bitmap {
+        val bitmap = Bitmap.createBitmap(THEME_ASSET_SIZE, THEME_ASSET_SIZE, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+        val previousBounds = Rect(drawable.bounds)
+        try {
+            drawable.setBounds(0, 0, THEME_ASSET_SIZE, THEME_ASSET_SIZE)
+            drawable.draw(canvas)
+        } finally {
+            drawable.bounds = previousBounds
+        }
+        return bitmap
+    }
+
+    private fun normalizeMask(source: Bitmap, inverse: Boolean): Bitmap {
+        val width = source.width
+        val height = source.height
+        val pixels = IntArray(width * height)
+        source.getPixels(pixels, 0, width, 0, 0, width, height)
+        pixels.indices.forEach { index ->
+            val sourceAlpha = pixels[index] ushr 24
+            val alpha = if (inverse) 255 - sourceAlpha else sourceAlpha
+            pixels[index] = (alpha shl 24) or 0x00FFFFFF
+        }
+        return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
+    }
+
+    private fun isInverseMask(bitmap: Bitmap): Boolean {
+        val edge = listOf(
+            bitmap.getPixel(0, 0),
+            bitmap.getPixel(bitmap.width - 1, 0),
+            bitmap.getPixel(0, bitmap.height - 1),
+            bitmap.getPixel(bitmap.width - 1, bitmap.height - 1),
+        ).map { it ushr 24 }.average()
+        val centre = bitmap.getPixel(bitmap.width / 2, bitmap.height / 2) ushr 24
+        return edge - centre > MASK_DIRECTION_THRESHOLD
+    }
+
+    private fun createMaskPath(mask: Bitmap): String {
+        val centerX = (mask.width - 1) / 2f
+        val centerY = (mask.height - 1) / 2f
+        val radii = List(MASK_PATH_SAMPLES) { index ->
+            val angle = Math.PI * 2.0 * index / MASK_PATH_SAMPLES
+            radialExtent(mask, centerX, centerY, angle)
+        }
+        val axis = listOf(radii[0], radii[16], radii[32], radii[48]).average()
+        val diagonal = listOf(radii[8], radii[24], radii[40], radii[56]).average()
+        if (axis > 0.0 && diagonal / axis < CIRCLE_DIAGONAL_RATIO) {
+            val radius = axis * 100.0 / (mask.width - 1)
+            val left = formatPathValue(50.0 - radius)
+            val radiusValue = formatPathValue(radius)
+            return "M50 $left" +
+                "A$radiusValue $radiusValue 0 1 1 50 ${formatPathValue(50.0 + radius)}" +
+                "A$radiusValue $radiusValue 0 1 1 50 $left" +
+                "Z"
+        }
+        return buildString {
+            radii.forEachIndexed { index, radius ->
+                val angle = Math.PI * 2.0 * index / MASK_PATH_SAMPLES
+                val x = (centerX + kotlin.math.cos(angle) * radius) * 100.0 / (mask.width - 1)
+                val y = (centerY + kotlin.math.sin(angle) * radius) * 100.0 / (mask.height - 1)
+                append(if (index == 0) 'M' else 'L')
+                append(formatPathValue(x)).append(' ').append(formatPathValue(y))
+            }
+            append('Z')
+        }
+    }
+
+    private fun radialExtent(mask: Bitmap, centerX: Float, centerY: Float, angle: Double): Double {
+        val maxRadius = kotlin.math.hypot(mask.width.toDouble(), mask.height.toDouble()) / 2.0
+        var lastVisible = 0.0
+        var radius = 0.0
+        while (radius <= maxRadius) {
+            val x = (centerX + kotlin.math.cos(angle) * radius).toInt()
+            val y = (centerY + kotlin.math.sin(angle) * radius).toInt()
+            if (x !in 0 until mask.width || y !in 0 until mask.height) break
+            if ((mask.getPixel(x, y) ushr 24) >= MASK_VISIBLE_ALPHA) lastVisible = radius
+            radius += MASK_PATH_STEP
+        }
+        return lastVisible
+    }
+
+    private fun Bitmap.toPng(): ByteArray = ByteArrayOutputStream().use { output ->
+        check(compress(Bitmap.CompressFormat.PNG, 100, output)) { "无法编码主题通用图标素材" }
+        output.toByteArray()
+    }
+
+    private fun renderDrawableToPng(drawable: Drawable): ByteArray {
+        val bitmap = renderDrawable(drawable)
+        return try {
+            bitmap.toPng()
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    private fun formatPathValue(value: Double): String = String.format(Locale.ROOT, "%.2f", value)
+        .trimEnd('0')
+        .trimEnd('.')
+
     private fun componentKey(component: ComponentName): String =
         "${component.packageName.lowercase(Locale.ROOT)}/${component.className}"
 
@@ -463,8 +593,22 @@ internal class ParsedIconPack private constructor(
         private const val CALENDAR_FINISHED_SPAN = 0.70f
         private const val MIN_FALLBACK_SCALE = 0.5f
         private const val MAX_FALLBACK_SCALE = 2f
+        private const val THEME_ASSET_SIZE = 256
+        private const val MASK_VISIBLE_ALPHA = 128
+        private const val MASK_DIRECTION_THRESHOLD = 32.0
+        private const val MASK_PATH_SAMPLES = 64
+        private const val MASK_PATH_STEP = 0.5
+        private const val CIRCLE_DIAGONAL_RATIO = 1.08
     }
 }
+
+internal data class XiaomiThemeFallback(
+    val maskPng: ByteArray,
+    val patternPng: ByteArray?,
+    val borderPng: ByteArray?,
+    val configIconMask: String,
+    val sourceScale: Float,
+)
 
 /** A single standard appfilter ComponentInfo -> drawable association. */
 internal data class IconPackMapping(

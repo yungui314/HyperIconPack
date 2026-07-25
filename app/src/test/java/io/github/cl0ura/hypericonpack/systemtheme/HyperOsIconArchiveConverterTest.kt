@@ -11,7 +11,7 @@ import org.junit.Test
 
 class HyperOsIconArchiveConverterTest {
     @Test
-    fun `legacy layered transform config is normalized to static icon lookup`() {
+    fun `legacy layered transform config is normalized to stable static config`() {
         val archive = createArchiveWithTransformConfig(
             """
             <?xml version="1.0" encoding="UTF-8"?>
@@ -29,16 +29,19 @@ class HyperOsIconArchiveConverterTest {
             )
 
             val config = readTransformConfig(archive)
-            assertTrue(config.contains("name=\"UseDynamicIcon\" value=\"false\""))
             assertTrue(config.contains("name=\"SupportLayerIcon\" value=\"false\""))
+            assertTrue(config.contains("name=\"UseDynamicIcon\" value=\"false\""))
+            assertTrue(config.contains("name=\"ConfigIconMask\""))
+            assertFalse(config.contains("value=\"M0 0H100V100H0Z\""))
             assertFalse(config.contains("name=\"SupportLayerIcon\" value=\"true\""))
+            assertFalse(config.contains("name=\"UseDynamicIcon\" value=\"true\""))
         } finally {
             archive.delete()
         }
     }
 
     @Test
-    fun `old dynamic transform config is rewritten to UseDynamicIcon false when disabled`() {
+    fun `old dynamic transform config is rewritten to stable static config`() {
         val archive = createArchiveWithTransformConfig(
             """
             <?xml version="1.0" encoding="UTF-8"?>
@@ -56,8 +59,8 @@ class HyperOsIconArchiveConverterTest {
             )
 
             val config = readTransformConfig(archive)
-            assertTrue(config.contains("name=\"UseDynamicIcon\" value=\"false\""))
             assertTrue(config.contains("name=\"SupportLayerIcon\" value=\"false\""))
+            assertTrue(config.contains("name=\"UseDynamicIcon\" value=\"false\""))
             assertFalse(config.contains("name=\"SupportLayerIcon\" value=\"true\""))
             assertFalse(config.contains("name=\"UseDynamicIcon\" value=\"true\""))
         } finally {
@@ -66,13 +69,13 @@ class HyperOsIconArchiveConverterTest {
     }
 
     @Test
-    fun `matching static transform config is left unchanged`() {
+    fun `matching non full mask transform config is left unchanged`() {
         val original = """
             <?xml version="1.0" encoding="UTF-8"?>
             <IconTransform>
                 <Config name="SupportLayerIcon" value="false" />
                 <Config name="UseDynamicIcon" value="false" />
-                <Config name="ConfigIconMask" value="M0 0H100V100H0Z" />
+                <Config name="ConfigIconMask" value="M50 0A50 50 0 1 1 50 100A50 50 0 1 1 50 0Z" />
             </IconTransform>
         """.trimIndent()
         val archive = createArchiveWithTransformConfig(original)
@@ -86,49 +89,11 @@ class HyperOsIconArchiveConverterTest {
             val config = readTransformConfig(archive)
             assertTrue(config.contains("name=\"SupportLayerIcon\" value=\"false\""))
             assertTrue(config.contains("name=\"UseDynamicIcon\" value=\"false\""))
-            // Unchanged path should keep the same archive file.
+            assertTrue(config.contains("M50 0A50 50"))
+            assertFalse(config.contains("name=\"SupportLayerIcon\" value=\"true\""))
+            assertFalse(config.contains("name=\"UseDynamicIcon\" value=\"true\""))
             assertTrue(archive.isFile)
             assertTrue(archive.lastModified() >= before)
-        } finally {
-            archive.delete()
-        }
-    }
-
-    @Test
-    fun `native fallback transform keeps scale and omits full mask`() {
-        val archive = File.createTempFile("hyper-iconpack-native-transform", ".zip")
-        try {
-            ZipOutputStream(FileOutputStream(archive)).use { output ->
-                val variant = IconArchiveVariant(
-                    iconPackPackage = "com.example.icons",
-                    fallbackScaleMultiplier = 0.85f,
-                    globalMonetIcons = false,
-                    monetCustomColors = false,
-                    monetBackgroundColor = 0,
-                    monetForegroundColor = 0,
-                    applicationScopeFingerprint = "apps",
-                    monetPaletteFingerprint = "",
-                    nativeFallback = true,
-                    nativeFallbackScale = 0.9775f,
-                )
-                IconArchiveFormat.writeMetadata(output, variant)
-                IconArchiveFormat.writeTransformConfig(
-                    zip = output,
-                    useDynamicIcon = false,
-                    nativeFallbackScale = variant.nativeFallbackScale,
-                )
-            }
-
-            HyperOsIconArchiveConverter.ensureUseDynamicIconTransformConfig(
-                iconArchive = archive,
-                enableDynamicIcons = true,
-            )
-
-            val config = readTransformConfig(archive)
-            assertTrue(config.contains("name=\"UseDynamicIcon\" value=\"true\""))
-            assertTrue(config.contains("<ScaleX value=\"0.9775\" />"))
-            assertTrue(config.contains("<ScaleY value=\"0.9775\" />"))
-            assertFalse(config.contains("ConfigIconMask"))
         } finally {
             archive.delete()
         }

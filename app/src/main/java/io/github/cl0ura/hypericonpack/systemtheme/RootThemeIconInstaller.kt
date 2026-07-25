@@ -24,6 +24,7 @@ internal object RootThemeIconInstaller {
     private const val NO_ORIGINAL_MARKER = "$RUNTIME_STATE_DIRECTORY/icons.no-original"
     private const val ACTIVE_HASH_MARKER = "$RUNTIME_STATE_DIRECTORY/icons.sha256"
     private const val HASH_TEMPORARY = "$RUNTIME_STATE_DIRECTORY/icons.sha256.new"
+    private const val DEFAULT_ICON_STATE_BACKUP = "$RUNTIME_STATE_DIRECTORY/is_default_icon.backup"
     private const val LEGACY_BACKUP = "$THEME_DIRECTORY/.hypericonpack-icons.backup"
     private const val LEGACY_NO_ORIGINAL_MARKER = "$THEME_DIRECTORY/.hypericonpack-icons.no-original"
     private const val LEGACY_ACTIVE_HASH_MARKER = "$THEME_DIRECTORY/.hypericonpack-icons.sha256"
@@ -141,11 +142,8 @@ internal object RootThemeIconInstaller {
         mkdir -p '$RUNTIME_STATE_DIRECTORY'
         owner="${'$'}(stat -c %u '$THEME_DIRECTORY')"
         group="${'$'}(stat -c %g '$THEME_DIRECTORY')"
-        chown "${'$'}owner:${'$'}group" '$THEME_DIRECTORY/.runtime' 2>/dev/null || true
-        chmod 0755 '$THEME_DIRECTORY/.runtime' 2>/dev/null || true
-        chcon u:object_r:theme_data_file:s0 '$THEME_DIRECTORY/.runtime' 2>/dev/null || true
         chown "${'$'}owner:${'$'}group" '$RUNTIME_STATE_DIRECTORY' 2>/dev/null || true
-        chmod 0755 '$RUNTIME_STATE_DIRECTORY' 2>/dev/null || true
+        chmod 0700 '$RUNTIME_STATE_DIRECTORY' 2>/dev/null || true
         chcon u:object_r:theme_data_file:s0 '$RUNTIME_STATE_DIRECTORY' 2>/dev/null || true
         touch '$RUNTIME_STATE_DIRECTORY/.write-probe'
         rm -f '$RUNTIME_STATE_DIRECTORY/.write-probe'
@@ -162,6 +160,7 @@ internal object RootThemeIconInstaller {
         no_original='$NO_ORIGINAL_MARKER'
         active_hash='$ACTIVE_HASH_MARKER'
         hash_temporary='$HASH_TEMPORARY'
+        default_icon_state_backup='$DEFAULT_ICON_STATE_BACKUP'
         legacy_backup='$LEGACY_BACKUP'
         legacy_no_original='$LEGACY_NO_ORIGINAL_MARKER'
         legacy_active_hash='$LEGACY_ACTIVE_HASH_MARKER'
@@ -176,15 +175,10 @@ internal object RootThemeIconInstaller {
         mkdir -p "${'$'}state_dir"
         owner="${'$'}(stat -c %u "${'$'}theme_dir")"
         group="${'$'}(stat -c %g "${'$'}theme_dir")"
-        # HyperOS keeps /data/system/theme/.runtime as 0700 with a restricted
-        # SELinux category.  system_server must traverse it and read our managed
-        # marker; otherwise ThemeReceiver deletes hand-installed icons.
-        runtime_root="${'$'}theme_dir/.runtime"
-        chown "${'$'}owner:${'$'}group" "${'$'}runtime_root" 2>/dev/null || true
-        chmod 0755 "${'$'}runtime_root" 2>/dev/null || true
-        chcon u:object_r:theme_data_file:s0 "${'$'}runtime_root" 2>/dev/null || true
+        # DRM ownership is identified from metadata inside the icons ZIP.
+        # Do not loosen Xiaomi's .runtime directory merely for system_server.
         chown "${'$'}owner:${'$'}group" "${'$'}state_dir" 2>/dev/null || true
-        chmod 0755 "${'$'}state_dir" 2>/dev/null || true
+        chmod 0700 "${'$'}state_dir" 2>/dev/null || true
         chcon u:object_r:theme_data_file:s0 "${'$'}state_dir" 2>/dev/null || true
         # Migrate legacy root-level markers into the DRM-safe runtime folder.
         if [ ! -e "${'$'}backup" ] && [ -e "${'$'}legacy_backup" ]; then
@@ -225,6 +219,15 @@ internal object RootThemeIconInstaller {
             chown "${'$'}owner:${'$'}group" "${'$'}no_original"
             chmod 0600 "${'$'}no_original"
           fi
+        fi
+        if [ ! -e "${'$'}default_icon_state_backup" ]; then
+          default_icon_state="${'$'}(settings get global is_default_icon 2>/dev/null || true)"
+          if [ -z "${'$'}default_icon_state" ] || [ "${'$'}default_icon_state" = "null" ]; then
+            default_icon_state='null'
+          fi
+          printf '%s\n' "${'$'}default_icon_state" > "${'$'}default_icon_state_backup"
+          chown "${'$'}owner:${'$'}group" "${'$'}default_icon_state_backup"
+          chmod 0600 "${'$'}default_icon_state_backup"
         fi
         if [ ! -e "${'$'}dynamic_backup" ] && [ ! -e "${'$'}dynamic_no_original" ]; then
           if [ -e "${'$'}dynamic_target" ]; then
@@ -267,6 +270,11 @@ internal object RootThemeIconInstaller {
           fi
         fi
         rm -f "${'$'}dynamic_none" "${'$'}dynamic_temporary"
+        # Theme Manager marks every third-party icon module as non-default.
+        # Launcher uses this flag to avoid clamping transparent static PNGs to
+        # its default rounded rectangle during launch/return animations.
+        settings put global is_default_icon 1
+        [ "${'$'}(settings get global is_default_icon)" = "1" ]
         ls -lZ "${'$'}target"
         echo 'HYPER_ICONPACK_INSTALL_OK'
     """.trimIndent()
@@ -277,6 +285,7 @@ internal object RootThemeIconInstaller {
         backup='$BACKUP'
         no_original='$NO_ORIGINAL_MARKER'
         active_hash='$ACTIVE_HASH_MARKER'
+        default_icon_state_backup='$DEFAULT_ICON_STATE_BACKUP'
         legacy_backup='$LEGACY_BACKUP'
         legacy_no_original='$LEGACY_NO_ORIGINAL_MARKER'
         legacy_active_hash='$LEGACY_ACTIVE_HASH_MARKER'
@@ -326,6 +335,15 @@ internal object RootThemeIconInstaller {
         fi
         rm -f '$DYNAMIC_TEMPORARY' '$DYNAMIC_NONE_MARKER' \
           '$LEGACY_DYNAMIC_BACKUP' '$LEGACY_DYNAMIC_NO_ORIGINAL' '$LEGACY_DYNAMIC_NONE_MARKER'
+        if [ -f "${'$'}default_icon_state_backup" ]; then
+          default_icon_state="${'$'}(cat "${'$'}default_icon_state_backup")"
+          if [ "${'$'}default_icon_state" = "null" ]; then
+            settings delete global is_default_icon >/dev/null
+          else
+            settings put global is_default_icon "${'$'}default_icon_state"
+          fi
+          rm -f "${'$'}default_icon_state_backup"
+        fi
         rm -f "${'$'}legacy_active_hash" 2>/dev/null || true
         echo 'HYPER_ICONPACK_RESTORE_OK'
     """.trimIndent()
