@@ -54,10 +54,15 @@ internal object IconPngRenderer {
     fun render(
         drawable: Drawable,
         palette: GlobalMonetPalette?,
+        liquidGlass: Boolean = false,
         nativeMonochrome: NativeMonochromeSource? = null,
     ): PngRenderResult {
         return try {
             ByteArrayOutputStream().use { output ->
+                if (liquidGlass) {
+                    LiquidGlassIconRenderer.render(drawable, RENDER_SIZE_PX, output)
+                    return@use PngRenderResult(output.toByteArray(), PngRenderFallback.NONE)
+                }
                 if (palette == null) {
                     renderDrawableAsPng(drawable, output)
                     return@use PngRenderResult(output.toByteArray(), PngRenderFallback.NONE)
@@ -82,7 +87,11 @@ internal object IconPngRenderer {
                     }
                 }
                 if (highFidelity) {
-                    return@use PngRenderResult(output.toByteArray(), PngRenderFallback.NONE)
+                    return@use PngRenderResult(
+                        png = output.toByteArray(),
+                        fallback = PngRenderFallback.NONE,
+                        usedNativeMonochrome = nativeMonochrome != null,
+                    )
                 }
 
                 output.reset()
@@ -143,6 +152,7 @@ internal object IconPngRenderer {
     fun renderParallelTasks(
         tasks: List<PngRenderTask>,
         palette: GlobalMonetPalette?,
+        liquidGlass: Boolean = false,
         isCancelled: () -> Boolean,
         parallelism: Int = recommendedParallelism(),
     ): Map<String, PngRenderResult> {
@@ -154,7 +164,7 @@ internal object IconPngRenderer {
         if (workerCount == 1) {
             return tasks.associate { task ->
                 checkCancelled(isCancelled)
-                task.key to renderTask(task, palette)
+                task.key to renderTask(task, palette, liquidGlass)
             }
         }
 
@@ -169,7 +179,7 @@ internal object IconPngRenderer {
             val futures = tasks.map { task ->
                 task.key to executor.submit(Callable {
                     checkCancelled(isCancelled)
-                    renderTask(task, palette)
+                    renderTask(task, palette, liquidGlass)
                 })
             }
             buildMap(tasks.size) {
@@ -241,6 +251,7 @@ internal object IconPngRenderer {
     private fun renderTask(
         task: PngRenderTask,
         palette: GlobalMonetPalette?,
+        liquidGlass: Boolean = false,
     ): PngRenderResult {
         val source = try {
             task.resolveSource()
@@ -251,16 +262,16 @@ internal object IconPngRenderer {
         } ?: return PngRenderResult(null, PngRenderFallback.FAILED)
         val native = source.nativeMonochrome
         val result = if (native == null) {
-            render(source.drawable, palette)
+            render(source.drawable, palette, liquidGlass)
         } else {
             // Cached native monochrome layers can be shared by aliases. Their
             // Drawable bounds are mutable, so serialize only requests sharing
             // that glyph while unrelated icons continue in parallel.
             synchronized(native.glyph) {
-                render(source.drawable, palette, native)
+                render(source.drawable, palette, liquidGlass, native)
             }
         }
-        return if (native == null) result else result.copy(usedNativeMonochrome = true)
+        return result
     }
 
     private fun recommendedParallelism(): Int {

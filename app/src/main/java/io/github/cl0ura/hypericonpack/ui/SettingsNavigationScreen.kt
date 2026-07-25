@@ -95,6 +95,7 @@ internal enum class SettingsDestination {
 internal data class IconSource(
     val packageName: String,
     val label: String,
+    val supportsDarkIcons: Boolean = false,
 )
 
 @Composable

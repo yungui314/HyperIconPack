@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import io.github.cl0ura.hypericonpack.root.RootAccess
+import io.github.cl0ura.hypericonpack.config.IconAppearance
 import java.io.File
 import java.security.MessageDigest
 import java.util.Locale
@@ -15,34 +16,40 @@ internal object IconArchiveCache {
     private const val LEGACY_ARCHIVE_FILE_NAME = "hypericonpack-icons.zip"
     private const val DYNAMIC_ARCHIVE_SUFFIX = "-dynamicicons.zip"
     private const val SCOPE_FINGERPRINT_LENGTH = 20
-    private const val GLOBAL_MONET_RENDERING = "global_monet_v18"
+    private const val GLOBAL_MONET_RENDERING = "global_monet_v20"
 
     fun existingArchive(
         context: Context,
         iconPackPackage: String?,
         fallbackScaleMultiplier: Float,
         globalMonetIcons: Boolean,
+        liquidGlassIcons: Boolean = false,
         monetCustomColors: Boolean,
         monetBackgroundColor: Int,
         monetForegroundColor: Int,
+        iconAppearance: IconAppearance = IconAppearance.FOLLOW_SYSTEM,
     ): File? {
         val packageName = iconPackPackage?.takeIf(String::isNotBlank) ?: return null
         val paletteFingerprint = currentMonetPaletteFingerprint(
             context = context,
             globalMonetIcons = globalMonetIcons,
+            liquidGlassIcons = liquidGlassIcons,
             monetCustomColors = monetCustomColors,
             monetBackgroundColor = monetBackgroundColor,
             monetForegroundColor = monetForegroundColor,
+            iconAppearance = iconAppearance,
         )
         val variant = IconArchiveVariant(
             iconPackPackage = packageName,
             fallbackScaleMultiplier = fallbackScaleMultiplier,
             globalMonetIcons = globalMonetIcons,
+            liquidGlassIcons = liquidGlassIcons,
             monetCustomColors = monetCustomColors,
             monetBackgroundColor = monetBackgroundColor,
             monetForegroundColor = monetForegroundColor,
             applicationScopeFingerprint = applicationScopeFingerprint(context),
             monetPaletteFingerprint = paletteFingerprint,
+            iconAppearance = iconAppearance,
         )
         val cached = archiveFile(context, variant, createDirectory = false).takeIf(File::isFile)
         if (cached != null && IconArchiveFormat.readInfo(cached)?.isCurrentFormat == true) return cached
@@ -56,11 +63,13 @@ internal object IconArchiveCache {
                     kotlin.math.abs(scale - fallbackScaleMultiplier) < 0.001f
                 } == true &&
                 info.globalMonetIcons == globalMonetIcons &&
+                info.liquidGlassIcons == liquidGlassIcons &&
                 info.monetCustomColors == (globalMonetIcons && monetCustomColors) &&
                 (!globalMonetIcons || !monetCustomColors ||
                     (info.monetBackgroundColor == monetBackgroundColor &&
                         info.monetForegroundColor == monetForegroundColor)) &&
                 info.monetPaletteFingerprint == paletteFingerprint &&
+                info.iconAppearance == iconAppearance &&
                 info.applicationScopeFingerprint == variant.applicationScopeFingerprint
         }
     }
@@ -81,7 +90,11 @@ internal object IconArchiveCache {
         return (cached + listOfNotNull(legacy))
             .filter(IconArchiveInfo::isCurrentFormat)
             .distinctBy { it.archive.absolutePath }
-            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.iconPackPackage ?: it.archive.name })
+            .sortedWith(
+                compareBy<IconArchiveInfo, String>(String.CASE_INSENSITIVE_ORDER) {
+                    it.iconPackPackage ?: it.archive.name
+                }.thenBy { it.iconAppearance.ordinal },
+            )
     }
 
     fun latestCachedArchiveForSource(context: Context, iconPackPackage: String?): IconArchiveInfo? {
@@ -131,10 +144,12 @@ internal object IconArchiveCache {
         append("format=").append(ICON_ARCHIVE_FORMAT_VERSION).append('|')
         append(variant.iconPackPackage)
         append('|').append("%.3f".format(Locale.ROOT, variant.fallbackScaleMultiplier))
+        if (variant.liquidGlassIcons) append("|render=liquid_glass_v3")
         if (variant.globalMonetIcons) append("|render=").append(GLOBAL_MONET_RENDERING)
         if (variant.globalMonetIcons) {
             append("|palette_fingerprint=").append(variant.monetPaletteFingerprint)
         }
+        append("|appearance=").append(variant.iconAppearance.storageValue)
         if (variant.globalMonetIcons && variant.monetCustomColors) {
             append("|palette=custom")
             append("|background=").append(variant.monetBackgroundColor.toUInt().toString(16))

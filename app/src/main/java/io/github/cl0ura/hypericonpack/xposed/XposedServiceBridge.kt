@@ -181,6 +181,8 @@ object XposedServiceBridge : XposedServiceHelper.OnServiceListener {
                     remove("monet_custom_colors")
                     remove("monet_background_color")
                     remove("monet_foreground_color")
+                    remove("icon_appearance")
+                    remove("monet_appearance")
                     remove("system_theme_animation_bridge")
                 }
                 .apply()

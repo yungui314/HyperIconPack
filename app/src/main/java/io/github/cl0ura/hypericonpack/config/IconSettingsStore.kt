@@ -23,6 +23,7 @@ class IconSettingsStore(context: Context) {
             fallbackScaleMultiplier = preferences.getFloat(KEY_FALLBACK_SCALE, DEFAULT_FALLBACK_SCALE)
                 .coerceIn(MIN_FALLBACK_SCALE, MAX_FALLBACK_SCALE),
             globalMonetIcons = preferences.getBoolean(KEY_GLOBAL_MONET_ICONS, false),
+            liquidGlassIcons = preferences.getBoolean(KEY_LIQUID_GLASS_ICONS, false),
             monetCustomColors = preferences.getBoolean(KEY_MONET_CUSTOM_COLORS, false),
             monetBackgroundColor = preferences.getInt(
                 KEY_MONET_BACKGROUND_COLOR,
@@ -31,6 +32,10 @@ class IconSettingsStore(context: Context) {
             monetForegroundColor = preferences.getInt(
                 KEY_MONET_FOREGROUND_COLOR,
                 IconPackConfig.DEFAULT_MONET_FOREGROUND_COLOR,
+            ),
+            iconAppearance = IconAppearance.fromStorage(
+                preferences.getString(KEY_ICON_APPEARANCE, null)
+                    ?: preferences.getString(KEY_LEGACY_MONET_APPEARANCE, null),
             ),
             conversionAllApplications = true,
             systemThemeActive = preferences.getBoolean(KEY_SYSTEM_THEME_ACTIVE, false),
@@ -51,9 +56,12 @@ class IconSettingsStore(context: Context) {
                 normalized.fallbackScaleMultiplier.coerceIn(MIN_FALLBACK_SCALE, MAX_FALLBACK_SCALE),
             )
             .putBoolean(KEY_GLOBAL_MONET_ICONS, normalized.globalMonetIcons)
+            .putBoolean(KEY_LIQUID_GLASS_ICONS, normalized.liquidGlassIcons && !normalized.globalMonetIcons)
             .putBoolean(KEY_MONET_CUSTOM_COLORS, normalized.monetCustomColors)
             .putInt(KEY_MONET_BACKGROUND_COLOR, normalized.monetBackgroundColor)
             .putInt(KEY_MONET_FOREGROUND_COLOR, normalized.monetForegroundColor)
+            .putString(KEY_ICON_APPEARANCE, normalized.iconAppearance.storageValue)
+            .remove(KEY_LEGACY_MONET_APPEARANCE)
             .putBoolean(KEY_CONVERSION_ALL_APPLICATIONS, normalized.conversionAllApplications)
             .putBoolean(KEY_SYSTEM_THEME_ACTIVE, normalized.systemThemeActive)
             .putLong(KEY_REVISION, normalized.revision)
@@ -260,9 +268,12 @@ class IconSettingsStore(context: Context) {
         const val KEY_PACKAGE_NAME = "package_name"
         const val KEY_FALLBACK_SCALE = "fallback_scale"
         const val KEY_GLOBAL_MONET_ICONS = "global_monet_icons"
+        const val KEY_LIQUID_GLASS_ICONS = "liquid_glass_icons"
         const val KEY_MONET_CUSTOM_COLORS = "monet_custom_colors"
         const val KEY_MONET_BACKGROUND_COLOR = "monet_background_color"
         const val KEY_MONET_FOREGROUND_COLOR = "monet_foreground_color"
+        const val KEY_ICON_APPEARANCE = "icon_appearance"
+        const val KEY_LEGACY_MONET_APPEARANCE = "monet_appearance"
         const val KEY_CONVERSION_ALL_APPLICATIONS = "conversion_all_applications"
         const val KEY_SYSTEM_THEME_ACTIVE = "system_theme_active"
         const val KEY_REVISION = "revision"

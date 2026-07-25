@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import io.github.cl0ura.hypericonpack.iconpack.IconPackMapping
 import io.github.cl0ura.hypericonpack.iconpack.ParsedIconPack
+import io.github.cl0ura.hypericonpack.config.IconAppearance
 import io.github.cl0ura.hypericonpack.logging.AppLog
 import java.io.BufferedOutputStream
 import java.io.File
@@ -20,9 +21,11 @@ internal object FullIconArchiveBuilder {
         iconPackPackage: String,
         fallbackScaleMultiplier: Float,
         globalMonetIcons: Boolean,
+        liquidGlassIcons: Boolean,
         monetCustomColors: Boolean,
         monetBackgroundColor: Int,
         monetForegroundColor: Int,
+        iconAppearance: IconAppearance,
         pack: ParsedIconPack?,
         mappings: List<IconPackMapping>,
         catalog: InstalledAppCatalog,
@@ -53,11 +56,13 @@ internal object FullIconArchiveBuilder {
             iconPackPackage = iconPackPackage,
             fallbackScaleMultiplier = fallbackScaleMultiplier,
             globalMonetIcons = globalMonetIcons,
+            liquidGlassIcons = liquidGlassIcons,
             monetCustomColors = globalMonetIcons && monetCustomColors,
             monetBackgroundColor = monetBackgroundColor,
             monetForegroundColor = monetForegroundColor,
             applicationScopeFingerprint = IconArchiveCache.applicationScopeFingerprint(context),
             monetPaletteFingerprint = palette?.cacheFingerprint.orEmpty(),
+            iconAppearance = iconAppearance,
         )
         val archive = IconArchiveCache.archiveFile(
             context = context,
@@ -65,25 +70,25 @@ internal object FullIconArchiveBuilder {
             createDirectory = true,
         )
         val temporaryArchive = File(archive.parentFile, "${archive.name}.new")
+        val inferredMonetFallbackMask = if (globalMonetIcons) pack?.inferMonetFallbackMask() else null
         val drawableResolver = IconDrawableResolver(
             context = context,
             pack = pack,
             fallbackScaleMultiplier = fallbackScaleMultiplier,
             globalMonetIcons = globalMonetIcons,
-            systemAdaptiveMask = IconDrawableResolver.resolveSystemAdaptiveMask(
-                context = context,
-                applications = installedApplications,
-            ),
+            inferredMonetFallbackMask = inferredMonetFallbackMask,
         )
         val packageRenderer = InstalledPackageIconRenderer(
             resolver = drawableResolver,
             palette = palette,
+            liquidGlass = liquidGlassIcons,
             isCancelled = isCancelled,
         )
         val themeFallback = pack?.createXiaomiThemeFallback(fallbackScaleMultiplier)
         AppLog.info(
             context,
-            "Conversion scope: apps=${installedApplications.size}, launchers=${fallbackActivities.size}, mappings=${mappings.size}",
+            "Conversion scope: apps=${installedApplications.size}, launchers=${fallbackActivities.size}, " +
+                "mappings=${mappings.size}, inferredMonetFallback=${inferredMonetFallbackMask != null}",
         )
 
         var explicitConverted = 0
@@ -156,6 +161,7 @@ internal object FullIconArchiveBuilder {
                         val rendered = IconPngRenderer.renderParallelTasks(
                             tasks = tasks,
                             palette = palette,
+                            liquidGlass = liquidGlassIcons,
                             isCancelled = isCancelled,
                         )
                         tasks.forEach { task ->

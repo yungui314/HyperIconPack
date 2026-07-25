@@ -1,5 +1,6 @@
 package io.github.cl0ura.hypericonpack.systemtheme
 
+import io.github.cl0ura.hypericonpack.config.IconAppearance
 import java.io.File
 import java.io.FileOutputStream
 import java.util.zip.ZipFile
@@ -22,6 +23,7 @@ class IconArchiveFormatTest {
             monetForegroundColor = 0xFFABCDEF.toInt(),
             applicationScopeFingerprint = "0123456789abcdefghij",
             monetPaletteFingerprint = "ff123456:ff789abc:ffabcdef",
+            iconAppearance = IconAppearance.DARK,
         )
         try {
             ZipOutputStream(FileOutputStream(archive)).use { output ->
@@ -42,6 +44,7 @@ class IconArchiveFormatTest {
             assertEquals(variant.monetForegroundColor, info.monetForegroundColor)
             assertEquals(variant.applicationScopeFingerprint, info.applicationScopeFingerprint)
             assertEquals(variant.monetPaletteFingerprint, info.monetPaletteFingerprint)
+            assertEquals(variant.iconAppearance, info.iconAppearance)
             assertTrue(info.isCurrentFormat)
             ZipFile(archive).use { zip ->
                 val config = zip.getInputStream(zip.getEntry(IconArchiveFormat.TRANSFORM_CONFIG_ENTRY))

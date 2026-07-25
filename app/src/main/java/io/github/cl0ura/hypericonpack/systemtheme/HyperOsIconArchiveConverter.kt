@@ -3,7 +3,9 @@ package io.github.cl0ura.hypericonpack.systemtheme
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import io.github.cl0ura.hypericonpack.config.IconPackConfig
+import io.github.cl0ura.hypericonpack.config.IconAppearance
 import io.github.cl0ura.hypericonpack.iconpack.ParsedIconPack
 import java.io.File
 import java.util.zip.ZipFile
@@ -80,6 +82,7 @@ internal object HyperOsIconArchiveConverter {
     fun sourceLabel(packageName: String?): String = when {
         packageName == null -> "未选择图标来源"
         isOriginalIconSource(packageName) -> ORIGINAL_ICON_LABEL
+        MtzIconArchiveImporter.isImportedSource(packageName) -> MtzIconArchiveImporter.sourceLabel(packageName)
         else -> packageName
     }
 
@@ -105,9 +108,11 @@ internal object HyperOsIconArchiveConverter {
         iconPackPackage: String,
         fallbackScaleMultiplier: Float,
         globalMonetIcons: Boolean = false,
+        liquidGlassIcons: Boolean = false,
         monetCustomColors: Boolean = false,
         monetBackgroundColor: Int = IconPackConfig.DEFAULT_MONET_BACKGROUND_COLOR,
         monetForegroundColor: Int = IconPackConfig.DEFAULT_MONET_FOREGROUND_COLOR,
+        iconAppearance: IconAppearance = IconAppearance.FOLLOW_SYSTEM,
         onProgress: ((ConversionProgress) -> Unit)? = null,
         isCancelled: () -> Boolean = { false },
     ): Result {
@@ -118,6 +123,8 @@ internal object HyperOsIconArchiveConverter {
         }
         checkCancelled()
         require(iconPackPackage.isNotBlank()) { "请先选择一个图标来源" }
+        require(!(globalMonetIcons && liquidGlassIcons)) { "Monet 与 Liquid Glass 不能同时启用" }
+        val renderContext = context.withIconAppearance(iconAppearance)
 
         onProgress?.invoke(
             ConversionProgress(
@@ -130,7 +137,7 @@ internal object HyperOsIconArchiveConverter {
         val pack = if (isOriginalIconSource(iconPackPackage)) {
             null
         } else {
-            ParsedIconPack.load(context, iconPackPackage) { parseFailure = it }
+            ParsedIconPack.load(renderContext, iconPackPackage, iconAppearance) { parseFailure = it }
                 ?: throw IllegalStateException(
                     "无法读取 $iconPackPackage 的 appfilter.xml",
                     parseFailure,
@@ -140,27 +147,30 @@ internal object HyperOsIconArchiveConverter {
         if (pack != null) {
             require(allMappings.isNotEmpty()) { "图标包不含可转换的 ComponentInfo 图标映射" }
         }
-        val catalog = InstalledAppCatalog.load(context)
+        val catalog = InstalledAppCatalog.load(renderContext)
         val mappings = if (pack == null) {
             emptyList()
         } else {
             allMappings
         }
         val palette = loadMonetPalette(
-            context = context,
+            context = renderContext,
             globalMonetIcons = globalMonetIcons,
             monetCustomColors = monetCustomColors,
             monetBackgroundColor = monetBackgroundColor,
             monetForegroundColor = monetForegroundColor,
+            iconAppearance = iconAppearance,
         )
         return FullIconArchiveBuilder.build(
-            context = context,
+            context = renderContext,
             iconPackPackage = iconPackPackage,
             fallbackScaleMultiplier = fallbackScaleMultiplier,
             globalMonetIcons = globalMonetIcons,
+            liquidGlassIcons = liquidGlassIcons,
             monetCustomColors = monetCustomColors,
             monetBackgroundColor = monetBackgroundColor,
             monetForegroundColor = monetForegroundColor,
+            iconAppearance = iconAppearance,
             pack = pack,
             mappings = mappings,
             catalog = catalog,
@@ -179,17 +189,21 @@ internal object HyperOsIconArchiveConverter {
         iconPackPackage: String?,
         fallbackScaleMultiplier: Float,
         globalMonetIcons: Boolean = false,
+        liquidGlassIcons: Boolean = false,
         monetCustomColors: Boolean = false,
         monetBackgroundColor: Int = IconPackConfig.DEFAULT_MONET_BACKGROUND_COLOR,
         monetForegroundColor: Int = IconPackConfig.DEFAULT_MONET_FOREGROUND_COLOR,
+        iconAppearance: IconAppearance = IconAppearance.FOLLOW_SYSTEM,
     ): File? = IconArchiveCache.existingArchive(
         context = context,
         iconPackPackage = iconPackPackage,
         fallbackScaleMultiplier = fallbackScaleMultiplier,
         globalMonetIcons = globalMonetIcons,
+        liquidGlassIcons = liquidGlassIcons,
         monetCustomColors = monetCustomColors,
         monetBackgroundColor = monetBackgroundColor,
         monetForegroundColor = monetForegroundColor,
+        iconAppearance = iconAppearance,
     )
 
     /**
@@ -205,6 +219,7 @@ internal object HyperOsIconArchiveConverter {
         monetCustomColors: Boolean = false,
         monetBackgroundColor: Int = IconPackConfig.DEFAULT_MONET_BACKGROUND_COLOR,
         monetForegroundColor: Int = IconPackConfig.DEFAULT_MONET_FOREGROUND_COLOR,
+        iconAppearance: IconAppearance = IconAppearance.FOLLOW_SYSTEM,
     ): IconArchiveInfo? = existingArchive(
         context = context,
         iconPackPackage = iconPackPackage,
@@ -213,6 +228,7 @@ internal object HyperOsIconArchiveConverter {
         monetCustomColors = monetCustomColors,
         monetBackgroundColor = monetBackgroundColor,
         monetForegroundColor = monetForegroundColor,
+        iconAppearance = iconAppearance,
     )
         ?.let(IconArchiveFormat::readInfo)
 
@@ -264,20 +280,24 @@ internal object HyperOsIconArchiveConverter {
         iconPackPackage: String,
         fallbackScaleMultiplier: Float,
         globalMonetIcons: Boolean,
+        liquidGlassIcons: Boolean = false,
         monetCustomColors: Boolean,
         monetBackgroundColor: Int,
         monetForegroundColor: Int,
+        iconAppearance: IconAppearance = IconAppearance.FOLLOW_SYSTEM,
         packageNames: Collection<String>,
     ): File {
-        val pack = loadParsedIconPack(context, iconPackPackage)
+        val renderContext = context.withIconAppearance(iconAppearance)
+        val pack = loadParsedIconPack(renderContext, iconPackPackage, iconAppearance)
         val palette = loadMonetPalette(
-            context = context,
+            context = renderContext,
             globalMonetIcons = globalMonetIcons,
             monetCustomColors = monetCustomColors,
             monetBackgroundColor = monetBackgroundColor,
             monetForegroundColor = monetForegroundColor,
+            iconAppearance = iconAppearance,
         )
-        val catalog = InstalledAppCatalog.load(context)
+        val catalog = InstalledAppCatalog.load(renderContext)
         val launchableComponents = catalog.launchableComponents
         val launchEntriesByPackage = launchableComponents
             .map { component -> component.packageName to archiveEntryName(component) }
@@ -304,31 +324,34 @@ internal object HyperOsIconArchiveConverter {
             }
         }
         val updated = PackageArchiveMutator.updateInstalledPackages(
-            context = context,
+            context = renderContext,
             baseArchive = baseArchive,
             iconPackPackage = iconPackPackage,
             fallbackScaleMultiplier = fallbackScaleMultiplier,
             globalMonetIcons = globalMonetIcons,
+            liquidGlassIcons = liquidGlassIcons,
             monetCustomColors = monetCustomColors,
             monetBackgroundColor = monetBackgroundColor,
             monetForegroundColor = monetForegroundColor,
             monetPaletteFingerprint = palette?.cacheFingerprint.orEmpty(),
+            iconAppearance = iconAppearance,
             packageNames = packageNames,
             preservedEntryNames = preservedEntryNames,
             launchEntryNames = { packageName -> launchEntriesByPackage[packageName].orEmpty() },
             renderPackages = { requestedPackages ->
                 renderInstalledPackagesPng(
-                    context = context,
+                    context = renderContext,
                     pack = pack,
                     palette = palette,
                     fallbackScaleMultiplier = fallbackScaleMultiplier,
                     globalMonetIcons = globalMonetIcons,
+                    liquidGlassIcons = liquidGlassIcons,
                     packageNames = requestedPackages,
                 )
             },
         )
         return refreshDynamicCalendarEntries(
-            context = context,
+            context = renderContext,
             archive = updated,
             pack = pack,
             palette = palette,
@@ -361,8 +384,9 @@ internal object HyperOsIconArchiveConverter {
             monetCustomColors = info.monetCustomColors,
             monetBackgroundColor = info.monetBackgroundColor,
             monetForegroundColor = info.monetForegroundColor,
+            iconAppearance = info.iconAppearance,
         )
-        val pack = loadParsedIconPack(context, iconPackPackage)
+        val pack = loadParsedIconPack(context, iconPackPackage, info.iconAppearance)
         val catalog = InstalledAppCatalog.load(context)
         val requestedPackages = packageNames.filter(String::isNotBlank).toSet()
         val preservedEntryNames = pack?.explicitMappings()
@@ -408,6 +432,7 @@ internal object HyperOsIconArchiveConverter {
         monetCustomColors: Boolean,
         monetBackgroundColor: Int,
         monetForegroundColor: Int,
+        iconAppearance: IconAppearance = IconAppearance.FOLLOW_SYSTEM,
         packageName: String,
     ): ByteArray? = runCatching {
         renderInstalledPackagesPng(
@@ -418,6 +443,7 @@ internal object HyperOsIconArchiveConverter {
             monetCustomColors = monetCustomColors,
             monetBackgroundColor = monetBackgroundColor,
             monetForegroundColor = monetForegroundColor,
+            iconAppearance = iconAppearance,
             packageNames = listOf(packageName),
         )[packageName]
     }.getOrNull()
@@ -430,18 +456,21 @@ internal object HyperOsIconArchiveConverter {
         monetCustomColors: Boolean,
         monetBackgroundColor: Int,
         monetForegroundColor: Int,
+        iconAppearance: IconAppearance,
         packageNames: List<String>,
     ): Map<String, ByteArray?> {
-        val pack = loadParsedIconPack(context, iconPackPackage)
+        val renderContext = context.withIconAppearance(iconAppearance)
+        val pack = loadParsedIconPack(renderContext, iconPackPackage, iconAppearance)
         val palette = loadMonetPalette(
-            context = context,
+            context = renderContext,
             globalMonetIcons = globalMonetIcons,
             monetCustomColors = monetCustomColors,
             monetBackgroundColor = monetBackgroundColor,
             monetForegroundColor = monetForegroundColor,
+            iconAppearance = iconAppearance,
         )
         return renderInstalledPackagesPng(
-            context = context,
+            context = renderContext,
             pack = pack,
             palette = palette,
             fallbackScaleMultiplier = fallbackScaleMultiplier,
@@ -456,6 +485,7 @@ internal object HyperOsIconArchiveConverter {
         palette: GlobalMonetPalette?,
         fallbackScaleMultiplier: Float,
         globalMonetIcons: Boolean,
+        liquidGlassIcons: Boolean = false,
         packageNames: List<String>,
     ): Map<String, ByteArray?> {
         val resolver = IconDrawableResolver(
@@ -463,11 +493,11 @@ internal object HyperOsIconArchiveConverter {
             pack = pack,
             fallbackScaleMultiplier = fallbackScaleMultiplier,
             globalMonetIcons = globalMonetIcons,
-            systemAdaptiveMask = null,
         )
         val rendered = InstalledPackageIconRenderer(
             resolver = resolver,
             palette = palette,
+            liquidGlass = liquidGlassIcons,
             isCancelled = { false },
         ).renderPackages(packageNames)
         return packageNames.associateWith { packageName -> rendered[packageName]?.png }
@@ -502,11 +532,15 @@ internal object HyperOsIconArchiveConverter {
         return archive
     }
 
-    private fun loadParsedIconPack(context: Context, iconPackPackage: String): ParsedIconPack? =
+    private fun loadParsedIconPack(
+        context: Context,
+        iconPackPackage: String,
+        iconAppearance: IconAppearance = IconAppearance.FOLLOW_SYSTEM,
+    ): ParsedIconPack? =
         if (isOriginalIconSource(iconPackPackage)) {
             null
         } else {
-            ParsedIconPack.load(context, iconPackPackage)
+            ParsedIconPack.load(context, iconPackPackage, iconAppearance)
                 ?: throw IllegalStateException("无法读取当前图标包")
         }
 
@@ -516,15 +550,29 @@ internal object HyperOsIconArchiveConverter {
         monetCustomColors: Boolean,
         monetBackgroundColor: Int,
         monetForegroundColor: Int,
+        iconAppearance: IconAppearance = IconAppearance.FOLLOW_SYSTEM,
     ): GlobalMonetPalette? = if (globalMonetIcons) {
         SystemMonetIconPalette.global(
             context,
             monetCustomColors,
             monetBackgroundColor,
             monetForegroundColor,
+            iconAppearance,
         )
     } else {
         null
+    }
+
+    private fun Context.withIconAppearance(appearance: IconAppearance): Context {
+        if (appearance == IconAppearance.FOLLOW_SYSTEM) return this
+        val configured = Configuration(resources.configuration).apply {
+            uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or when (appearance) {
+                IconAppearance.LIGHT -> Configuration.UI_MODE_NIGHT_NO
+                IconAppearance.DARK -> Configuration.UI_MODE_NIGHT_YES
+                IconAppearance.FOLLOW_SYSTEM -> error("unreachable")
+            }
+        }
+        return createConfigurationContext(configured)
     }
 
     /** All valid cached archives, used by the settings UI for fast switching. */

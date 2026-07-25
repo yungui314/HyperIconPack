@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import io.github.cl0ura.hypericonpack.config.IconPackConfig
 import io.github.cl0ura.hypericonpack.config.IconSettingsStore
+import io.github.cl0ura.hypericonpack.config.IconAppearance
 import io.github.cl0ura.hypericonpack.logging.AppLog
 import io.github.cl0ura.hypericonpack.iconpack.IconPackDescriptor
 import io.github.cl0ura.hypericonpack.iconpack.IconPackDiscovery
@@ -53,6 +54,7 @@ import io.github.cl0ura.hypericonpack.systemtheme.HyperOsIconArchiveConverter
 import io.github.cl0ura.hypericonpack.systemtheme.IconArchiveConversionController
 import io.github.cl0ura.hypericonpack.systemtheme.IconArchiveConversionRequest
 import io.github.cl0ura.hypericonpack.systemtheme.IconArchiveConversionState
+import io.github.cl0ura.hypericonpack.systemtheme.MtzIconArchiveImporter
 import io.github.cl0ura.hypericonpack.systemtheme.PackageThemeArchiveUpdateScheduler
 import io.github.cl0ura.hypericonpack.systemtheme.RootThemeIconInstaller
 import kotlinx.coroutines.Dispatchers
@@ -92,6 +94,7 @@ internal fun IconArchiveCreatorPage(
 ) {
     val context = LocalContext.current.applicationContext
     val settingsStore = remember(context) { IconSettingsStore(context) }
+    val coroutineScope = rememberCoroutineScope()
     val initialConfig = remember { settingsStore.read() }
     val conversionState by IconArchiveConversionController.state.collectAsState()
     val sources = remember(iconPacks) {
@@ -100,7 +103,13 @@ internal fun IconArchiveCreatorPage(
                 packageName = HyperOsIconArchiveConverter.ORIGINAL_ICON_PACKAGE,
                 label = HyperOsIconArchiveConverter.ORIGINAL_ICON_LABEL,
             ),
-        ) + iconPacks.map { IconSource(packageName = it.packageName, label = it.label) }
+        ) + iconPacks.map {
+            IconSource(
+                packageName = it.packageName,
+                label = it.label,
+                supportsDarkIcons = it.supportsDarkIcons,
+            )
+        }
     }
     var selectedSourcePackage by rememberSaveable {
         mutableStateOf(initialConfig.packageName ?: HyperOsIconArchiveConverter.ORIGINAL_ICON_PACKAGE)
@@ -108,18 +117,25 @@ internal fun IconArchiveCreatorPage(
     val selectedSource = sources.firstOrNull { it.packageName == selectedSourcePackage }
     var scale by rememberSaveable { mutableFloatStateOf(initialConfig.fallbackScaleMultiplier) }
     var globalMonet by rememberSaveable { mutableStateOf(initialConfig.globalMonetIcons) }
+    var liquidGlass by rememberSaveable { mutableStateOf(initialConfig.liquidGlassIcons) }
     var monetCustomColors by rememberSaveable { mutableStateOf(initialConfig.monetCustomColors) }
     var monetBackgroundColor by rememberSaveable { mutableStateOf(initialConfig.monetBackgroundColor) }
     var monetForegroundColor by rememberSaveable { mutableStateOf(initialConfig.monetForegroundColor) }
+    var generateAppearancePair by rememberSaveable { mutableStateOf(false) }
     var selectorOpen by rememberSaveable { mutableStateOf(false) }
     var pendingRequest by remember { mutableStateOf<IconArchiveConversionRequest?>(null) }
+    var importingMtz by rememberSaveable { mutableStateOf(false) }
+    var mtzImportSummary by rememberSaveable { mutableStateOf("选择 MTZ 后仅导入其中的 icons 模块") }
     val runningState = conversionState as? IconArchiveConversionState.Running
     val converting = runningState != null
     val progress = runningState?.progress
     val summary = when (val state = conversionState) {
         IconArchiveConversionState.Idle -> "转换完成后会自动保存为图标存档。"
         is IconArchiveConversionState.Running -> "正在转换 ${state.request.sourceLabel}…"
-        is IconArchiveConversionState.Succeeded -> "已保存 · ${state.convertedIcons} 个图标"
+        is IconArchiveConversionState.Succeeded -> {
+            val archiveCount = state.archivePaths.size
+            "已保存 $archiveCount 份存档 · ${state.convertedIcons} 个图标"
+        }
         is IconArchiveConversionState.Failed -> "转换失败：${state.message}"
     }
 
@@ -133,6 +149,26 @@ internal fun IconArchiveCreatorPage(
         pendingRequest?.let(::launchConversion)
         pendingRequest = null
     }
+    val mtzPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null || importingMtz) return@rememberLauncherForActivityResult
+        coroutineScope.launch {
+            importingMtz = true
+            mtzImportSummary = "正在导入 MTZ 图标模块…"
+            val imported = withContext(Dispatchers.IO) {
+                runCatching { MtzIconArchiveImporter.import(context, uri) }
+            }
+            imported.fold(
+                onSuccess = { info ->
+                    mtzImportSummary = "已导入 ${HyperOsIconArchiveConverter.sourceLabel(info.iconPackPackage)}"
+                    onArchiveSaved()
+                },
+                onFailure = { throwable ->
+                    mtzImportSummary = "导入失败：${throwable.message ?: throwable.javaClass.simpleName}"
+                },
+            )
+            importingMtz = false
+        }
+    }
 
     fun startConversion() {
         val source = selectedSource ?: return
@@ -142,9 +178,12 @@ internal fun IconArchiveCreatorPage(
             sourceLabel = source.label,
             fallbackScaleMultiplier = scale,
             globalMonetIcons = globalMonet,
+            liquidGlassIcons = liquidGlass,
             monetCustomColors = monetCustomColors,
             monetBackgroundColor = monetBackgroundColor,
             monetForegroundColor = monetForegroundColor,
+            iconAppearance = IconAppearance.FOLLOW_SYSTEM,
+            generateAppearancePair = generateAppearancePair && source.supportsDarkIcons,
         )
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -174,6 +213,12 @@ internal fun IconArchiveCreatorPage(
                         onClick = { selectorOpen = true },
                         enabled = !converting,
                     )
+                    ArrowPreference(
+                        title = "导入 MTZ 图标主题",
+                        summary = mtzImportSummary,
+                        onClick = { mtzPicker.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
+                        enabled = !converting && !importingMtz,
+                    )
                     SliderPreference(
                         title = "图标适配比例",
                         summary = "调整未映射图标的内容大小",
@@ -188,7 +233,14 @@ internal fun IconArchiveCreatorPage(
                         title = "全局 Monet（实验性）",
                         summary = "复杂渐变、半透明或动态图标转换后可能出现细节简化、色阶合并或轮廓偏差，效果取决于源图标资源。",
                         checked = globalMonet,
-                        onCheckedChange = { globalMonet = it },
+                        onCheckedChange = { globalMonet = it; if (it) liquidGlass = false },
+                        enabled = !converting,
+                    )
+                    SwitchPreference(
+                        title = "Liquid Glass 图标（实验性）",
+                        summary = "静态模拟 iOS 26 液态玻璃材质；与 Monet 互斥，不影响未开启的转换",
+                        checked = liquidGlass,
+                        onCheckedChange = { liquidGlass = it; if (it) globalMonet = false },
                         enabled = !converting,
                     )
                     if (globalMonet) {
@@ -213,6 +265,15 @@ internal fun IconArchiveCreatorPage(
                                 onColorChanged = { monetForegroundColor = it },
                             )
                         }
+                    }
+                    if (selectedSource?.supportsDarkIcons == true) {
+                        SwitchPreference(
+                            title = "生成浅色与深色图标",
+                            summary = "图标包包含双模式资源；生成两份可独立识别和应用的存档",
+                            checked = generateAppearancePair,
+                            onCheckedChange = { generateAppearancePair = it },
+                            enabled = !converting,
+                        )
                     }
                 }
             }

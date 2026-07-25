@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.Drawable
+import io.github.cl0ura.hypericonpack.config.IconAppearance
 import java.io.OutputStream
 import kotlin.math.roundToInt
 
@@ -24,15 +25,18 @@ internal data class GlobalMonetPalette(
 internal fun currentMonetPaletteFingerprint(
     context: Context,
     globalMonetIcons: Boolean,
+    liquidGlassIcons: Boolean = false,
     monetCustomColors: Boolean,
     monetBackgroundColor: Int,
     monetForegroundColor: Int,
-): String = if (globalMonetIcons) {
+    iconAppearance: IconAppearance = IconAppearance.FOLLOW_SYSTEM,
+): String = if (globalMonetIcons && !liquidGlassIcons) {
     SystemMonetIconPalette.global(
         context = context,
         useCustomColors = monetCustomColors,
         backgroundColor = monetBackgroundColor,
         foregroundColor = monetForegroundColor,
+        appearance = iconAppearance,
     ).cacheFingerprint
 } else {
     ""
@@ -45,6 +49,7 @@ internal object SystemMonetIconPalette {
         useCustomColors: Boolean = false,
         backgroundColor: Int = 0xFFE8DEF8.toInt(),
         foregroundColor: Int = 0xFF4A4458.toInt(),
+        appearance: IconAppearance = IconAppearance.FOLLOW_SYSTEM,
     ): GlobalMonetPalette {
         if (useCustomColors) {
             val background = MonetColorMath.opaque(backgroundColor)
@@ -55,8 +60,13 @@ internal object SystemMonetIconPalette {
                 darkTone = foreground,
             )
         }
-        val dark = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
-            Configuration.UI_MODE_NIGHT_YES
+        val dark = when (appearance) {
+            IconAppearance.LIGHT -> false
+            IconAppearance.DARK -> true
+            IconAppearance.FOLLOW_SYSTEM ->
+                context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+                    Configuration.UI_MODE_NIGHT_YES
+        }
         return if (dark) {
             GlobalMonetPalette(
                 outerContainer = color(context, "system_accent1_700", Color.rgb(54, 74, 110)),
@@ -79,6 +89,99 @@ internal object SystemMonetIconPalette {
         }
     }
 
+}
+
+internal object NativeMonochromeQuality {
+    fun isAcceptable(shapePixels: IntArray, glyphPixels: IntArray, size: Int): Boolean {
+        if (size <= 0 || shapePixels.size != size * size || glyphPixels.size != shapePixels.size) return false
+
+        var shapeAlphaTotal = 0L
+        var glyphAlphaTotal = 0L
+        var shapeLeft = size
+        var shapeTop = size
+        var shapeRight = -1
+        var shapeBottom = -1
+        var glyphLeft = size
+        var glyphTop = size
+        var glyphRight = -1
+        var glyphBottom = -1
+        var weightedGlyphX = 0L
+        var weightedGlyphY = 0L
+
+        shapePixels.indices.forEach { index ->
+            val shapeAlpha = alpha(shapePixels[index])
+            val clippedGlyphAlpha = alpha(glyphPixels[index]) * shapeAlpha / OPAQUE_ALPHA
+            shapeAlphaTotal += shapeAlpha.toLong()
+            glyphAlphaTotal += clippedGlyphAlpha.toLong()
+            val x = index % size
+            val y = index / size
+            if (shapeAlpha >= VISIBLE_ALPHA) {
+                shapeLeft = minOf(shapeLeft, x)
+                shapeTop = minOf(shapeTop, y)
+                shapeRight = maxOf(shapeRight, x)
+                shapeBottom = maxOf(shapeBottom, y)
+            }
+            if (clippedGlyphAlpha >= VISIBLE_ALPHA) {
+                glyphLeft = minOf(glyphLeft, x)
+                glyphTop = minOf(glyphTop, y)
+                glyphRight = maxOf(glyphRight, x)
+                glyphBottom = maxOf(glyphBottom, y)
+                weightedGlyphX += x.toLong() * clippedGlyphAlpha
+                weightedGlyphY += y.toLong() * clippedGlyphAlpha
+            }
+        }
+        if (shapeAlphaTotal == 0L || glyphAlphaTotal == 0L || shapeRight < shapeLeft || glyphRight < glyphLeft) {
+            return false
+        }
+        val coveragePercent = glyphAlphaTotal * 100 / shapeAlphaTotal
+        if (coveragePercent !in MIN_COVERAGE_PERCENT..MAX_COVERAGE_PERCENT) return false
+
+        val shapeWidth = shapeRight - shapeLeft + 1
+        val shapeHeight = shapeBottom - shapeTop + 1
+        val glyphWidth = glyphRight - glyphLeft + 1
+        val glyphHeight = glyphBottom - glyphTop + 1
+        if (glyphWidth * 100 >= shapeWidth * MAX_BOUNDS_PERCENT &&
+            glyphHeight * 100 >= shapeHeight * MAX_BOUNDS_PERCENT
+        ) return false
+
+        val glyphCenterX = weightedGlyphX.toDouble() / glyphAlphaTotal
+        val glyphCenterY = weightedGlyphY.toDouble() / glyphAlphaTotal
+        val shapeCenterX = (shapeLeft + shapeRight) / 2.0
+        val shapeCenterY = (shapeTop + shapeBottom) / 2.0
+        if (kotlin.math.abs(glyphCenterX - shapeCenterX) > shapeWidth * MAX_CENTER_OFFSET ||
+            kotlin.math.abs(glyphCenterY - shapeCenterY) > shapeHeight * MAX_CENTER_OFFSET
+        ) return false
+
+        var boundaryGlyphAlpha = 0L
+        glyphPixels.indices.forEach { index ->
+            val shapeAlpha = alpha(shapePixels[index])
+            val clippedGlyphAlpha = alpha(glyphPixels[index]) * shapeAlpha / OPAQUE_ALPHA
+            if (clippedGlyphAlpha < VISIBLE_ALPHA) return@forEach
+            val x = index % size
+            val y = index / size
+            fun outside(sampleX: Int, sampleY: Int): Boolean =
+                sampleX !in 0 until size || sampleY !in 0 until size ||
+                    alpha(shapePixels[sampleY * size + sampleX]) < VISIBLE_ALPHA
+            if (
+                outside(x - BOUNDARY_PROBE_PX, y) || outside(x + BOUNDARY_PROBE_PX, y) ||
+                outside(x, y - BOUNDARY_PROBE_PX) || outside(x, y + BOUNDARY_PROBE_PX)
+            ) {
+                boundaryGlyphAlpha += clippedGlyphAlpha
+            }
+        }
+        return boundaryGlyphAlpha * 100 <= glyphAlphaTotal * MAX_BOUNDARY_PERCENT
+    }
+
+    private const val OPAQUE_ALPHA = 255
+    private const val VISIBLE_ALPHA = 32
+    private const val MIN_COVERAGE_PERCENT = 2L
+    private const val MAX_COVERAGE_PERCENT = 72L
+    private const val MAX_BOUNDS_PERCENT = 92
+    private const val MAX_CENTER_OFFSET = 0.18
+    private const val BOUNDARY_PROBE_PX = 4
+    private const val MAX_BOUNDARY_PERCENT = 8
+
+    private fun alpha(pixel: Int): Int = pixel ushr 24
 }
 
 /**
@@ -129,6 +232,9 @@ internal object GlobalMonetIconRenderer {
             glyphBitmap.getPixels(glyphPixels, 0, size, 0, 0, size, size)
             val visibleShape = shapePixels.sumOf { Color.alpha(it).toLong() }
             require(visibleShape > 0L) { "原生图标轮廓没有可见像素" }
+            require(NativeMonochromeQuality.isAcceptable(shapePixels, glyphPixels, size)) {
+                "原生单色图层的覆盖、位置或边界异常"
+            }
             val clippedGlyphTotal = glyphPixels.indices.sumOf { index ->
                 Color.alpha(glyphPixels[index]).toLong() * Color.alpha(shapePixels[index]) / OPAQUE
             }

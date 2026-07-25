@@ -5,9 +5,14 @@ import android.graphics.ColorFilter
 import android.graphics.Outline
 import android.graphics.Path
 import android.graphics.PixelFormat
+import android.graphics.Bitmap
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
+import io.github.cl0ura.hypericonpack.iconpack.InferredIconMask
 
 /**
  * Bakes the shape normally supplied by Android's adaptive-icon pipeline into
@@ -25,10 +30,16 @@ import android.graphics.drawable.Drawable
  */
 internal class SystemIconShapeDrawable(
     private val source: Drawable,
-    @Suppress("UNUSED_PARAMETER") private val systemMask: Any?,
+    private val inferredMask: InferredIconMask? = null,
 ) : Drawable(), Drawable.Callback {
     private val fallbackPath = Path()
     private val fallbackBounds = RectF()
+    private val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+    }
+    private val maskBitmap: Bitmap? = inferredMask?.let { mask ->
+        Bitmap.createBitmap(mask.pixels, mask.size, mask.size, Bitmap.Config.ARGB_8888)
+    }
 
     init {
         source.callback = this
@@ -37,7 +48,17 @@ internal class SystemIconShapeDrawable(
     override fun draw(canvas: Canvas) {
         val bounds = bounds
         if (bounds.isEmpty) return
-        val save = canvas.save()
+        val save = if (maskBitmap != null) {
+            canvas.saveLayer(
+                bounds.left.toFloat(),
+                bounds.top.toFloat(),
+                bounds.right.toFloat(),
+                bounds.bottom.toFloat(),
+                null,
+            )
+        } else {
+            canvas.save()
+        }
         try {
             // Do not let a vendor's square adaptive mask turn a static theme
             // PNG into a hard-cornered tile. The clip is intentionally a
@@ -50,8 +71,10 @@ internal class SystemIconShapeDrawable(
             fallbackBounds.inset(edgeInset, edgeInset)
             val radius = minOf(fallbackBounds.width(), fallbackBounds.height()) * MINIMUM_CORNER_RADIUS_FRACTION
             fallbackPath.reset()
-            fallbackPath.addRoundRect(fallbackBounds, radius, radius, Path.Direction.CW)
-            canvas.clipPath(fallbackPath)
+            if (maskBitmap == null) {
+                fallbackPath.addRoundRect(fallbackBounds, radius, radius, Path.Direction.CW)
+                canvas.clipPath(fallbackPath)
+            }
             val previousSourceBounds = Rect(source.bounds)
             try {
                 source.bounds = bounds
@@ -59,6 +82,7 @@ internal class SystemIconShapeDrawable(
             } finally {
                 source.bounds = previousSourceBounds
             }
+            maskBitmap?.let { mask -> canvas.drawBitmap(mask, null, bounds, maskPaint) }
         } finally {
             canvas.restoreToCount(save)
         }

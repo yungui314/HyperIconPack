@@ -1,6 +1,7 @@
 package io.github.cl0ura.hypericonpack.systemtheme
 
 import io.github.cl0ura.hypericonpack.config.IconPackConfig
+import io.github.cl0ura.hypericonpack.config.IconAppearance
 import io.github.cl0ura.hypericonpack.iconpack.XiaomiThemeFallback
 import java.io.BufferedOutputStream
 import java.io.File
@@ -10,21 +11,23 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
-// Format 34 adds Xiaomi's runtime fallback assets and removes the FullMask
-// transform that bypassed them and forced rectangular launcher animations.
-internal const val ICON_ARCHIVE_FORMAT_VERSION = 34
+// Format 35 records the resource appearance used for both original-colour and
+// Monet archives so light/dark variants remain independently identifiable.
+internal const val ICON_ARCHIVE_FORMAT_VERSION = 35
 
 internal data class IconArchiveInfo(
     val archive: File,
     val iconPackPackage: String?,
     val fallbackScaleMultiplier: Float?,
     val globalMonetIcons: Boolean,
+    val liquidGlassIcons: Boolean = false,
     val monetCustomColors: Boolean,
     val monetBackgroundColor: Int,
     val monetForegroundColor: Int,
     val applicationScopeFingerprint: String,
     val monetPaletteFingerprint: String,
     val formatVersion: Int?,
+    val iconAppearance: IconAppearance = IconAppearance.FOLLOW_SYSTEM,
 ) {
     val isCurrentFormat: Boolean
         get() = formatVersion == ICON_ARCHIVE_FORMAT_VERSION &&
@@ -35,11 +38,13 @@ internal data class IconArchiveVariant(
     val iconPackPackage: String,
     val fallbackScaleMultiplier: Float,
     val globalMonetIcons: Boolean,
+    val liquidGlassIcons: Boolean = false,
     val monetCustomColors: Boolean,
     val monetBackgroundColor: Int,
     val monetForegroundColor: Int,
     val applicationScopeFingerprint: String,
     val monetPaletteFingerprint: String,
+    val iconAppearance: IconAppearance = IconAppearance.FOLLOW_SYSTEM,
 )
 
 internal object IconArchiveFormat {
@@ -48,8 +53,9 @@ internal object IconArchiveFormat {
     const val ALL_APPLICATIONS_SCOPE = "all"
 
     private const val DEFAULT_RENDERING = "original"
-    private const val GLOBAL_MONET_RENDERING = "global_monet_v18"
+    private const val GLOBAL_MONET_RENDERING = "global_monet_v20"
     private const val GLOBAL_MONET_RENDERING_PREFIX = "global_monet_v"
+    private const val LIQUID_GLASS_RENDERING = "liquid_glass_v3"
 
     fun readInfo(archive: File): IconArchiveInfo? = runCatching {
         ZipFile(archive).use { zip ->
@@ -69,6 +75,7 @@ internal object IconArchiveFormat {
                 fallbackScaleMultiplier = values["fallback_scale"]?.toFloatOrNull(),
                 globalMonetIcons = values["icon_rendering"]
                     ?.startsWith(GLOBAL_MONET_RENDERING_PREFIX) == true,
+                liquidGlassIcons = values["icon_rendering"] == LIQUID_GLASS_RENDERING,
                 monetCustomColors = values["monet_palette"] == "custom",
                 monetBackgroundColor = values["monet_background"]
                     ?.toLongOrNull(16)
@@ -81,6 +88,7 @@ internal object IconArchiveFormat {
                 applicationScopeFingerprint = values["application_scope"] ?: ALL_APPLICATIONS_SCOPE,
                 monetPaletteFingerprint = values["monet_palette_fingerprint"].orEmpty(),
                 formatVersion = values["format"]?.toIntOrNull(),
+                iconAppearance = IconAppearance.fromStorage(values["icon_appearance"]),
             )
         }
     }.getOrElse {
@@ -98,7 +106,13 @@ internal object IconArchiveFormat {
             append("icon_pack_package=").append(variant.iconPackPackage).append('\n')
             append("fallback_scale=").append(variant.fallbackScaleMultiplier).append('\n')
             append("icon_rendering=")
-                .append(if (variant.globalMonetIcons) GLOBAL_MONET_RENDERING else DEFAULT_RENDERING)
+                .append(
+                    when {
+                        variant.liquidGlassIcons -> LIQUID_GLASS_RENDERING
+                        variant.globalMonetIcons -> GLOBAL_MONET_RENDERING
+                        else -> DEFAULT_RENDERING
+                    },
+                )
                 .append('\n')
             append("monet_palette=")
                 .append(if (variant.globalMonetIcons && variant.monetCustomColors) "custom" else "system")
@@ -110,6 +124,7 @@ internal object IconArchiveFormat {
                 .append(variant.monetForegroundColor.toUInt().toString(16))
                 .append('\n')
             append("monet_palette_fingerprint=").append(variant.monetPaletteFingerprint).append('\n')
+            append("icon_appearance=").append(variant.iconAppearance.storageValue).append('\n')
             append("application_scope=").append(variant.applicationScopeFingerprint).append('\n')
         }
         zip.putNextEntry(ZipEntry(METADATA_ENTRY))
@@ -269,6 +284,7 @@ internal object IconArchiveFormat {
         applicationScopeFingerprint = ALL_APPLICATIONS_SCOPE,
         monetPaletteFingerprint = "",
         formatVersion = null,
+        iconAppearance = IconAppearance.FOLLOW_SYSTEM,
     )
 
     private fun writeEntry(zip: ZipOutputStream, name: String, bytes: ByteArray) {

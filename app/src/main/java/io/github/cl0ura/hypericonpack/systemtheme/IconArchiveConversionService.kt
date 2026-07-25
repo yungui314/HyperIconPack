@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import io.github.cl0ura.hypericonpack.R
+import io.github.cl0ura.hypericonpack.config.IconAppearance
 import io.github.cl0ura.hypericonpack.logging.AppLog
 import io.github.cl0ura.hypericonpack.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
@@ -33,9 +34,12 @@ internal data class IconArchiveConversionRequest(
     val sourceLabel: String,
     val fallbackScaleMultiplier: Float,
     val globalMonetIcons: Boolean,
+    val liquidGlassIcons: Boolean = false,
     val monetCustomColors: Boolean,
     val monetBackgroundColor: Int,
     val monetForegroundColor: Int,
+    val iconAppearance: IconAppearance = IconAppearance.FOLLOW_SYSTEM,
+    val generateAppearancePair: Boolean = false,
 )
 
 internal sealed interface IconArchiveConversionState {
@@ -48,7 +52,7 @@ internal sealed interface IconArchiveConversionState {
 
     data class Succeeded(
         val request: IconArchiveConversionRequest,
-        val archivePath: String,
+        val archivePaths: List<String>,
         val convertedIcons: Int,
     ) : IconArchiveConversionState
 
@@ -137,41 +141,52 @@ class IconArchiveConversionService : Service() {
         conversionJob = serviceScope.launch {
             val result = runCatching {
                 ThemeArchiveMutationGate.withLock {
-                HyperOsIconArchiveConverter.convert(
-                    context = applicationContext,
-                    iconPackPackage = request.iconPackPackage,
-                    fallbackScaleMultiplier = request.fallbackScaleMultiplier,
-                    globalMonetIcons = request.globalMonetIcons,
-                    monetCustomColors = request.monetCustomColors,
-                    monetBackgroundColor = request.monetBackgroundColor,
-                    monetForegroundColor = request.monetForegroundColor,
-                    onProgress = { progress ->
-                        val state = IconArchiveConversionState.Running(request, progress)
-                        IconArchiveConversionController.publish(state)
-                        val percent = (progress.fraction * 100).toInt().coerceIn(0, 100)
-                        if (percent != lastNotifiedPercent || progress.phase != lastNotifiedPhase) {
-                            lastNotifiedPercent = percent
-                            lastNotifiedPhase = progress.phase
-                            notificationManager.notify(NOTIFICATION_ID, buildNotification(state))
-                        }
-                    },
-                    isCancelled = { !isActive },
-                )
+                val appearances = if (request.generateAppearancePair) {
+                    listOf(IconAppearance.LIGHT, IconAppearance.DARK)
+                } else {
+                    listOf(request.iconAppearance)
+                }
+                appearances.map { appearance ->
+                    HyperOsIconArchiveConverter.convert(
+                        context = applicationContext,
+                        iconPackPackage = request.iconPackPackage,
+                        fallbackScaleMultiplier = request.fallbackScaleMultiplier,
+                        globalMonetIcons = request.globalMonetIcons,
+                        liquidGlassIcons = request.liquidGlassIcons,
+                        monetCustomColors = request.monetCustomColors,
+                        monetBackgroundColor = request.monetBackgroundColor,
+                        monetForegroundColor = request.monetForegroundColor,
+                        iconAppearance = appearance,
+                        onProgress = { progress ->
+                            val state = IconArchiveConversionState.Running(request, progress)
+                            IconArchiveConversionController.publish(state)
+                            val percent = (progress.fraction * 100).toInt().coerceIn(0, 100)
+                            if (percent != lastNotifiedPercent || progress.phase != lastNotifiedPhase) {
+                                lastNotifiedPercent = percent
+                                lastNotifiedPhase = progress.phase
+                                notificationManager.notify(NOTIFICATION_ID, buildNotification(state))
+                            }
+                        },
+                        isCancelled = { !isActive },
+                    )
+                }
                 }
             }
 
             result.fold(
-                onSuccess = { archive ->
+                onSuccess = { archives ->
                     val state = IconArchiveConversionState.Succeeded(
                         request = request,
-                        archivePath = archive.archive.absolutePath,
-                        convertedIcons = archive.convertedExplicitMappings + archive.convertedPackageDefaults,
+                        archivePaths = archives.map { it.archive.absolutePath },
+                        convertedIcons = archives.firstOrNull()?.let {
+                            it.convertedExplicitMappings + it.convertedPackageDefaults
+                        } ?: 0,
                     )
                     IconArchiveConversionController.publish(state)
                     notificationManager.notify(NOTIFICATION_ID, buildNotification(state))
                     AppLog.info(
                         this@IconArchiveConversionService,
-                        "Conversion completed: ${archive.archive.name}, icons=${state.convertedIcons}",
+                        "Conversion completed: ${archives.joinToString { it.archive.name }}, icons=${state.convertedIcons}",
                     )
                 },
                 onFailure = { throwable ->
@@ -459,9 +474,12 @@ class IconArchiveConversionService : Service() {
         private const val EXTRA_LABEL = "label"
         private const val EXTRA_SCALE = "scale"
         private const val EXTRA_MONET = "monet"
+        private const val EXTRA_LIQUID_GLASS = "liquid_glass"
         private const val EXTRA_CUSTOM_COLORS = "custom_colors"
         private const val EXTRA_BACKGROUND = "background"
         private const val EXTRA_FOREGROUND = "foreground"
+        private const val EXTRA_ICON_APPEARANCE = "icon_appearance"
+        private const val EXTRA_APPEARANCE_PAIR = "appearance_pair"
 
         internal fun intent(context: Context, request: IconArchiveConversionRequest): Intent =
             Intent(context, IconArchiveConversionService::class.java).apply {
@@ -469,9 +487,12 @@ class IconArchiveConversionService : Service() {
                 putExtra(EXTRA_LABEL, request.sourceLabel)
                 putExtra(EXTRA_SCALE, request.fallbackScaleMultiplier)
                 putExtra(EXTRA_MONET, request.globalMonetIcons)
+                putExtra(EXTRA_LIQUID_GLASS, request.liquidGlassIcons)
                 putExtra(EXTRA_CUSTOM_COLORS, request.monetCustomColors)
                 putExtra(EXTRA_BACKGROUND, request.monetBackgroundColor)
                 putExtra(EXTRA_FOREGROUND, request.monetForegroundColor)
+                putExtra(EXTRA_ICON_APPEARANCE, request.iconAppearance.storageValue)
+                putExtra(EXTRA_APPEARANCE_PAIR, request.generateAppearancePair)
             }
 
         internal fun cancelIntent(context: Context): Intent =
@@ -486,9 +507,12 @@ class IconArchiveConversionService : Service() {
                 },
                 fallbackScaleMultiplier = getFloatExtra(EXTRA_SCALE, 0.85f),
                 globalMonetIcons = getBooleanExtra(EXTRA_MONET, false),
+                liquidGlassIcons = getBooleanExtra(EXTRA_LIQUID_GLASS, false),
                 monetCustomColors = getBooleanExtra(EXTRA_CUSTOM_COLORS, false),
                 monetBackgroundColor = getIntExtra(EXTRA_BACKGROUND, 0),
                 monetForegroundColor = getIntExtra(EXTRA_FOREGROUND, 0),
+                iconAppearance = IconAppearance.fromStorage(getStringExtra(EXTRA_ICON_APPEARANCE)),
+                generateAppearancePair = getBooleanExtra(EXTRA_APPEARANCE_PAIR, false),
             )
         }
     }

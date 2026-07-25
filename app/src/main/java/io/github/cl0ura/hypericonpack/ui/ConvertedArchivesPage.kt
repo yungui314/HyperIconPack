@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import io.github.cl0ura.hypericonpack.config.IconPackConfig
 import io.github.cl0ura.hypericonpack.config.IconSettingsStore
+import io.github.cl0ura.hypericonpack.config.IconAppearance
 import io.github.cl0ura.hypericonpack.logging.AppLog
 import io.github.cl0ura.hypericonpack.iconpack.IconPackDescriptor
 import io.github.cl0ura.hypericonpack.iconpack.IconPackDiscovery
@@ -99,6 +100,26 @@ internal fun ConvertedArchivesPage(
     var activeActionPath by remember { mutableStateOf<String?>(null) }
     var actionSummary by remember { mutableStateOf("选择一个存档应用到系统。") }
     var deletingArchive by remember { mutableStateOf<IconArchiveInfo?>(null) }
+    var activeArchivePath by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(archives) {
+        val matched = withContext(Dispatchers.IO) {
+            val status = RootThemeIconInstaller.status()
+            if (!status.success) return@withContext null
+            val activeHash = RootThemeIconInstaller.activeArchiveSha256(status)
+            val preferred = HyperOsIconArchiveConverter.archiveInfo(settingsStore.readActiveArchive())
+            findMatchingActiveArchive(
+                activeSha256 = activeHash,
+                preferred = preferred,
+                candidates = archives,
+                sha256 = { info ->
+                    runCatching { HyperOsIconArchiveConverter.sha256(info.archive) }.getOrNull()
+                },
+            )
+        }
+        activeArchivePath = matched?.archive?.absolutePath
+        settingsStore.writeActiveArchive(matched?.archive)
+    }
 
     fun applyArchive(archive: IconArchiveInfo) {
         if (activeActionPath != null) return
@@ -139,9 +160,11 @@ internal fun ConvertedArchivesPage(
                             fallbackScaleMultiplier = archive.fallbackScaleMultiplier
                                 ?: current.fallbackScaleMultiplier,
                             globalMonetIcons = archive.globalMonetIcons,
+                            liquidGlassIcons = archive.liquidGlassIcons,
                             monetCustomColors = archive.monetCustomColors,
                             monetBackgroundColor = archive.monetBackgroundColor,
                             monetForegroundColor = archive.monetForegroundColor,
+                            iconAppearance = archive.iconAppearance,
                             conversionAllApplications = true,
                             systemThemeActive = true,
                         ),
@@ -149,6 +172,7 @@ internal fun ConvertedArchivesPage(
                     if (settingsStore.pendingThemeArchivePackageUpdates().isNotEmpty()) {
                         PackageThemeArchiveUpdateScheduler.schedule(context)
                     }
+                    activeArchivePath = archive.archive.absolutePath
                     "已应用 $sourceName，桌面与系统界面已刷新"
                 } else {
                     "主题文件已写入，但系统界面刷新失败；请再次点击此存档重试"
@@ -206,6 +230,7 @@ internal fun ConvertedArchivesPage(
                         sourceLabel = archive.iconPackPackage?.let(sourceLabels::get)
                             ?: HyperOsIconArchiveConverter.sourceLabel(archive.iconPackPackage),
                         busy = activeActionPath == archive.archive.absolutePath,
+                        active = activeArchivePath == archive.archive.absolutePath,
                         onApply = { applyArchive(archive) },
                         onDelete = { deletingArchive = archive },
                     )
@@ -235,6 +260,7 @@ internal fun ConvertedArchiveCard(
     archive: IconArchiveInfo,
     sourceLabel: String,
     busy: Boolean,
+    active: Boolean,
     onApply: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -246,7 +272,18 @@ internal fun ConvertedArchiveCard(
         append(size).append(" · ").append(created)
         archive.fallbackScaleMultiplier?.let { append(" · ").append((it * 100).roundToInt()).append('%') }
         append(if (archive.globalMonetIcons) " · Monet" else " · 原始色彩")
+        if (archive.liquidGlassIcons) append(" · Liquid Glass")
         if (archive.globalMonetIcons && archive.monetCustomColors) append(" · 自定义配色")
+        if (archive.iconAppearance != IconAppearance.FOLLOW_SYSTEM) {
+            append(
+                when (archive.iconAppearance) {
+                    IconAppearance.LIGHT -> " · 浅色"
+                    IconAppearance.DARK -> " · 深色"
+                    IconAppearance.FOLLOW_SYSTEM -> ""
+                },
+            )
+        }
+        if (active) append(" · 当前使用")
         if (!archive.isCurrentFormat) append(" · 需要重新转换")
     }
 
@@ -274,12 +311,13 @@ internal fun ConvertedArchiveCard(
                 Spacer(Modifier.width(8.dp))
                 Button(
                     onClick = onApply,
-                    enabled = !busy && archive.iconPackPackage != null && archive.isCurrentFormat,
+                    enabled = !busy && !active && archive.iconPackPackage != null && archive.isCurrentFormat,
                 ) {
                     Text(
                         when {
                             !archive.isCurrentFormat -> "请重新转换"
                             busy -> "处理中"
+                            active -> "已使用"
                             else -> "使用"
                         },
                     )

@@ -158,6 +158,12 @@ private object PackageThemeArchiveUpdateWorker {
             pendingRemoves.forEach(settings::markThemeArchivePackageRemovalComplete)
             return@withLock false
         }
+        if (MtzIconArchiveImporter.isImportedSource(config.packageName)) {
+            pendingAdds.forEach(settings::markThemeArchivePackageUpdateComplete)
+            pendingRemoves.forEach(settings::markThemeArchivePackageRemovalComplete)
+            PackageThemeArchiveUpdateScheduler.log(context, "PACKAGE_UPDATE skipped for imported MTZ source")
+            return@withLock false
+        }
 
         val status = RootThemeIconInstaller.status()
         if (ManagedThemeStateReconciler.shouldClearManagedThemeState(config.systemThemeActive, status)) {
@@ -213,16 +219,19 @@ private object PackageThemeArchiveUpdateWorker {
             monetCustomColors = config.monetCustomColors,
             monetBackgroundColor = config.monetBackgroundColor,
             monetForegroundColor = config.monetForegroundColor,
+            iconAppearance = config.iconAppearance,
         )
         fun matchesConfiguration(info: IconArchiveInfo): Boolean =
             info.isCurrentFormat &&
                 info.iconPackPackage == config.packageName &&
                 info.globalMonetIcons == config.globalMonetIcons &&
+                info.liquidGlassIcons == config.liquidGlassIcons &&
                 info.monetCustomColors == (config.globalMonetIcons && config.monetCustomColors) &&
                 (!config.globalMonetIcons || !config.monetCustomColors ||
                     (info.monetBackgroundColor == config.monetBackgroundColor &&
                         info.monetForegroundColor == config.monetForegroundColor)) &&
                 info.monetPaletteFingerprint == paletteFingerprint &&
+                info.iconAppearance == config.iconAppearance &&
                 info.fallbackScaleMultiplier?.let {
                     kotlin.math.abs(it - config.fallbackScaleMultiplier) < 0.001f
                 } == true
@@ -276,9 +285,11 @@ private object PackageThemeArchiveUpdateWorker {
                     iconPackPackage = config.packageName,
                     fallbackScaleMultiplier = config.fallbackScaleMultiplier,
                     globalMonetIcons = config.globalMonetIcons,
+                    liquidGlassIcons = config.liquidGlassIcons,
                     monetCustomColors = config.monetCustomColors,
                     monetBackgroundColor = config.monetBackgroundColor,
                     monetForegroundColor = config.monetForegroundColor,
+                    iconAppearance = config.iconAppearance,
                     packageNames = targetAdds,
                 )
                 mutated = true

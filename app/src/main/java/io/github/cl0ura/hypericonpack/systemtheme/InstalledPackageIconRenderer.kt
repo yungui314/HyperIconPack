@@ -6,6 +6,7 @@ import android.content.pm.ApplicationInfo
 internal class InstalledPackageIconRenderer(
     private val resolver: IconDrawableResolver,
     private val palette: GlobalMonetPalette?,
+    private val liquidGlass: Boolean = false,
     private val isCancelled: () -> Boolean,
 ) {
     fun renderApplications(
@@ -21,6 +22,7 @@ internal class InstalledPackageIconRenderer(
         return IconPngRenderer.renderParallelTasks(
             tasks = tasks,
             palette = palette,
+            liquidGlass = liquidGlass,
             isCancelled = isCancelled,
         )
     }
@@ -39,6 +41,7 @@ internal class InstalledPackageIconRenderer(
         return IconPngRenderer.renderParallelTasks(
             tasks = tasks,
             palette = palette,
+            liquidGlass = liquidGlass,
             isCancelled = isCancelled,
         )
     }

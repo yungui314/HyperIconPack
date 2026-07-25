@@ -3,6 +3,7 @@ package io.github.cl0ura.hypericonpack.iconpack
 import android.content.ComponentName
 import android.content.Context
 import android.content.res.Resources
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -12,6 +13,7 @@ import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.util.Xml
 import io.github.cl0ura.hypericonpack.systemtheme.SystemIconShapeDrawable
+import io.github.cl0ura.hypericonpack.config.IconAppearance
 import org.xmlpull.v1.XmlPullParser
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -61,16 +63,35 @@ internal class ParsedIconPack private constructor(
         val declaredMask = style.maskName?.let(::loadDrawable)
         val shapeSource = declaredMask ?: background ?: return null
         val renderedShape = renderDrawable(shapeSource)
-        val inverseMask = declaredMask != null && isInverseMask(renderedShape)
-        val normalizedMask = normalizeMask(renderedShape, inverseMask)
-        val path = createMaskPath(normalizedMask)
+        val sourcePixels = IntArray(renderedShape.width * renderedShape.height)
+        renderedShape.getPixels(
+            sourcePixels,
+            0,
+            renderedShape.width,
+            0,
+            0,
+            renderedShape.width,
+            renderedShape.height,
+        )
+        val normalized = IconMaskGeometry.normalize(
+            renderedShape.width,
+            renderedShape.height,
+            sourcePixels,
+            detectInverse = declaredMask != null,
+        )
+        val normalizedMask = Bitmap.createBitmap(
+            normalized.pixels,
+            normalized.width,
+            normalized.height,
+            Bitmap.Config.ARGB_8888,
+        )
         val pattern = background?.let(::renderDrawableToPng)
         val border = style.foregroundName?.let(::loadDrawable)?.let(::renderDrawableToPng)
         val result = XiaomiThemeFallback(
             maskPng = normalizedMask.toPng(),
             patternPng = pattern,
             borderPng = border,
-            configIconMask = path,
+            configIconMask = normalized.configPath,
             sourceScale = (style.scale * scaleMultiplier).coerceIn(MIN_FALLBACK_SCALE, MAX_FALLBACK_SCALE),
         )
         renderedShape.recycle()
@@ -230,6 +251,70 @@ internal class ParsedIconPack private constructor(
         @Suppress("UNUSED_PARAMETER") component: ComponentName,
     ): Drawable? = loadMappedDrawable(drawableName)
 
+    /** Detects real icon artwork changes, excluding unrelated night resources in the pack UI. */
+    fun hasVisualDifferenceFrom(other: ParsedIconPack): Boolean {
+        val candidates = buildList {
+            addAll(componentToDrawable.values.distinct().sorted().sampleEvenly(APPEARANCE_PROBE_LIMIT))
+            fallbackStyle?.backgroundNames?.let(::addAll)
+            fallbackStyle?.maskName?.let(::add)
+            fallbackStyle?.foregroundName?.let(::add)
+        }.distinct()
+        return candidates.any { name -> drawablesDiffer(loadDrawable(name), other.loadDrawable(name)) }
+    }
+
+    /**
+     * Some packs omit appfilter fallback layers even though supplied icons
+     * share a user-selectable badge shape. Infer that shape only when mapped
+     * artwork has a strong, repeated alpha silhouette.
+     */
+    fun inferMonetFallbackMask(): InferredIconMask? {
+        if (supportsFallbackStyle) return null
+        val drawableNames = componentToDrawable.values
+            .distinct()
+            .sorted()
+            .sampleEvenly(MONET_SHAPE_PROBE_LIMIT)
+        val samples = drawableNames.mapNotNull { name ->
+            val drawable = loadMappedDrawable(name) ?: return@mapNotNull null
+            val bitmap = renderDrawable(drawable, MONET_SHAPE_PROBE_SIZE)
+            try {
+                val pixels = IntArray(bitmap.width * bitmap.height)
+                bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                pixels
+            } finally {
+                bitmap.recycle()
+            }
+        }
+        return IconPackShapeInference.infer(samples, MONET_SHAPE_PROBE_SIZE)
+    }
+
+    private fun drawablesDiffer(first: Drawable?, second: Drawable?): Boolean {
+        if (first == null || second == null) return first !== second
+        val firstBitmap = renderDrawable(first, APPEARANCE_PROBE_SIZE)
+        val secondBitmap = otherSizedBitmap(second, firstBitmap.width, firstBitmap.height)
+        return try {
+            val firstPixels = IntArray(firstBitmap.width * firstBitmap.height)
+            val secondPixels = IntArray(secondBitmap.width * secondBitmap.height)
+            firstBitmap.getPixels(firstPixels, 0, firstBitmap.width, 0, 0, firstBitmap.width, firstBitmap.height)
+            secondBitmap.getPixels(secondPixels, 0, secondBitmap.width, 0, 0, secondBitmap.width, secondBitmap.height)
+            !firstPixels.contentEquals(secondPixels)
+        } finally {
+            firstBitmap.recycle()
+            secondBitmap.recycle()
+        }
+    }
+
+    private fun otherSizedBitmap(drawable: Drawable, width: Int, height: Int): Bitmap {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val previousBounds = Rect(drawable.bounds)
+        try {
+            drawable.setBounds(0, 0, width, height)
+            drawable.draw(Canvas(bitmap))
+        } finally {
+            drawable.bounds = previousBounds
+        }
+        return bitmap
+    }
+
     /**
      * Returns the icon-pack resources explicitly associated with an app
      * package.  A few applications change their launcher Activity between
@@ -302,7 +387,7 @@ internal class ParsedIconPack private constructor(
      */
     private fun bakeAdaptiveShape(drawable: Drawable): Drawable =
         if (drawable is AdaptiveIconDrawable) {
-            SystemIconShapeDrawable(source = drawable, systemMask = drawable)
+            SystemIconShapeDrawable(source = drawable)
         } else {
             drawable
         }
@@ -344,86 +429,21 @@ internal class ParsedIconPack private constructor(
             ?: resources.getIdentifier(name, "mipmap", packageContext.packageName)
     }
 
-    private fun renderDrawable(drawable: Drawable): Bitmap {
-        val bitmap = Bitmap.createBitmap(THEME_ASSET_SIZE, THEME_ASSET_SIZE, Bitmap.Config.ARGB_8888)
+    private fun renderDrawable(
+        drawable: Drawable,
+        size: Int = THEME_ASSET_SIZE,
+    ): Bitmap {
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
         val previousBounds = Rect(drawable.bounds)
         try {
-            drawable.setBounds(0, 0, THEME_ASSET_SIZE, THEME_ASSET_SIZE)
+            drawable.setBounds(0, 0, size, size)
             drawable.draw(canvas)
         } finally {
             drawable.bounds = previousBounds
         }
         return bitmap
-    }
-
-    private fun normalizeMask(source: Bitmap, inverse: Boolean): Bitmap {
-        val width = source.width
-        val height = source.height
-        val pixels = IntArray(width * height)
-        source.getPixels(pixels, 0, width, 0, 0, width, height)
-        pixels.indices.forEach { index ->
-            val sourceAlpha = pixels[index] ushr 24
-            val alpha = if (inverse) 255 - sourceAlpha else sourceAlpha
-            pixels[index] = (alpha shl 24) or 0x00FFFFFF
-        }
-        return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
-    }
-
-    private fun isInverseMask(bitmap: Bitmap): Boolean {
-        val edge = listOf(
-            bitmap.getPixel(0, 0),
-            bitmap.getPixel(bitmap.width - 1, 0),
-            bitmap.getPixel(0, bitmap.height - 1),
-            bitmap.getPixel(bitmap.width - 1, bitmap.height - 1),
-        ).map { it ushr 24 }.average()
-        val centre = bitmap.getPixel(bitmap.width / 2, bitmap.height / 2) ushr 24
-        return edge - centre > MASK_DIRECTION_THRESHOLD
-    }
-
-    private fun createMaskPath(mask: Bitmap): String {
-        val centerX = (mask.width - 1) / 2f
-        val centerY = (mask.height - 1) / 2f
-        val radii = List(MASK_PATH_SAMPLES) { index ->
-            val angle = Math.PI * 2.0 * index / MASK_PATH_SAMPLES
-            radialExtent(mask, centerX, centerY, angle)
-        }
-        val axis = listOf(radii[0], radii[16], radii[32], radii[48]).average()
-        val diagonal = listOf(radii[8], radii[24], radii[40], radii[56]).average()
-        if (axis > 0.0 && diagonal / axis < CIRCLE_DIAGONAL_RATIO) {
-            val radius = axis * 100.0 / (mask.width - 1)
-            val left = formatPathValue(50.0 - radius)
-            val radiusValue = formatPathValue(radius)
-            return "M50 $left" +
-                "A$radiusValue $radiusValue 0 1 1 50 ${formatPathValue(50.0 + radius)}" +
-                "A$radiusValue $radiusValue 0 1 1 50 $left" +
-                "Z"
-        }
-        return buildString {
-            radii.forEachIndexed { index, radius ->
-                val angle = Math.PI * 2.0 * index / MASK_PATH_SAMPLES
-                val x = (centerX + kotlin.math.cos(angle) * radius) * 100.0 / (mask.width - 1)
-                val y = (centerY + kotlin.math.sin(angle) * radius) * 100.0 / (mask.height - 1)
-                append(if (index == 0) 'M' else 'L')
-                append(formatPathValue(x)).append(' ').append(formatPathValue(y))
-            }
-            append('Z')
-        }
-    }
-
-    private fun radialExtent(mask: Bitmap, centerX: Float, centerY: Float, angle: Double): Double {
-        val maxRadius = kotlin.math.hypot(mask.width.toDouble(), mask.height.toDouble()) / 2.0
-        var lastVisible = 0.0
-        var radius = 0.0
-        while (radius <= maxRadius) {
-            val x = (centerX + kotlin.math.cos(angle) * radius).toInt()
-            val y = (centerY + kotlin.math.sin(angle) * radius).toInt()
-            if (x !in 0 until mask.width || y !in 0 until mask.height) break
-            if ((mask.getPixel(x, y) ushr 24) >= MASK_VISIBLE_ALPHA) lastVisible = radius
-            radius += MASK_PATH_STEP
-        }
-        return lastVisible
     }
 
     private fun Bitmap.toPng(): ByteArray = ByteArrayOutputStream().use { output ->
@@ -440,10 +460,6 @@ internal class ParsedIconPack private constructor(
         }
     }
 
-    private fun formatPathValue(value: Double): String = String.format(Locale.ROOT, "%.2f", value)
-        .trimEnd('0')
-        .trimEnd('.')
-
     private fun componentKey(component: ComponentName): String =
         "${component.packageName.lowercase(Locale.ROOT)}/${component.className}"
 
@@ -451,13 +467,26 @@ internal class ParsedIconPack private constructor(
         fun load(
             hostContext: Context,
             iconPackPackage: String,
+            appearance: IconAppearance = IconAppearance.FOLLOW_SYSTEM,
             onError: (Throwable) -> Unit = {},
         ): ParsedIconPack? {
             return try {
-                val packageContext = hostContext.createPackageContext(
+                val basePackageContext = hostContext.createPackageContext(
                     iconPackPackage,
                     Context.CONTEXT_IGNORE_SECURITY,
                 )
+                val packageContext = if (appearance == IconAppearance.FOLLOW_SYSTEM) {
+                    basePackageContext
+                } else {
+                    val configuration = Configuration(basePackageContext.resources.configuration).apply {
+                        uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or when (appearance) {
+                            IconAppearance.LIGHT -> Configuration.UI_MODE_NIGHT_NO
+                            IconAppearance.DARK -> Configuration.UI_MODE_NIGHT_YES
+                            IconAppearance.FOLLOW_SYSTEM -> error("unreachable")
+                        }
+                    }
+                    basePackageContext.createConfigurationContext(configuration)
+                }
                 val appFilter = packageContext.openAssetAppFilter()?.use(::parseAppFilter)
                     ?: packageContext.parseXmlAppFilter()
                     ?: throw IllegalStateException("No assets/appfilter.xml or res/xml/appfilter in $iconPackPackage")
@@ -587,6 +616,10 @@ internal class ParsedIconPack private constructor(
             IconPackComponentNormalizer.normalize(rawComponent)
 
         private val IMAGE_ATTRIBUTE = Regex("img\\d+")
+        private const val APPEARANCE_PROBE_LIMIT = 96
+        private const val APPEARANCE_PROBE_SIZE = 64
+        private const val MONET_SHAPE_PROBE_LIMIT = 32
+        private const val MONET_SHAPE_PROBE_SIZE = 256
         private const val CALENDAR_PROBE_SIZE = 96
         private const val CALENDAR_VISIBLE_ALPHA = 24
         private const val CALENDAR_FINISHED_COVERAGE = 0.25f
@@ -594,12 +627,83 @@ internal class ParsedIconPack private constructor(
         private const val MIN_FALLBACK_SCALE = 0.5f
         private const val MAX_FALLBACK_SCALE = 2f
         private const val THEME_ASSET_SIZE = 256
-        private const val MASK_VISIBLE_ALPHA = 128
-        private const val MASK_DIRECTION_THRESHOLD = 32.0
-        private const val MASK_PATH_SAMPLES = 64
-        private const val MASK_PATH_STEP = 0.5
-        private const val CIRCLE_DIAGONAL_RATIO = 1.08
     }
+}
+
+internal object IconPackShapeInference {
+    fun infer(samples: List<IntArray>, size: Int): InferredIconMask? {
+        if (size <= 0 || samples.size < MIN_SAMPLES || samples.any { it.size != size * size }) return null
+        val eligible = samples.filter { sample -> hasBadgeSpan(sample, size) }
+        if (eligible.size < MIN_SAMPLES) return null
+        val voteThreshold = (eligible.size * MAJORITY_PERCENT + 99) / 100
+        val mask = IntArray(size * size)
+        mask.indices.forEach { index ->
+            val votes = eligible.count { sample -> sample[index] ushr 24 >= VISIBLE_ALPHA }
+            if (votes >= voteThreshold) {
+                val alpha = eligible.sumOf { sample -> sample[index] ushr 24 } / eligible.size
+                mask[index] = (alpha shl 24) or WHITE_RGB
+            }
+        }
+        if (!hasBadgeSpan(mask, size)) return null
+        val consistent = eligible.count { sample -> intersectionOverUnion(sample, mask) >= MIN_SAMPLE_IOU }
+        if (consistent * 100 < eligible.size * MIN_CONSISTENT_PERCENT) return null
+        val representative = eligible.maxBy { sample -> intersectionOverUnion(sample, mask) }
+        val antialiasedMask = IntArray(representative.size) { index ->
+            ((representative[index] ushr 24) shl 24) or WHITE_RGB
+        }
+        return InferredIconMask(size = size, pixels = antialiasedMask)
+    }
+
+    private fun hasBadgeSpan(pixels: IntArray, size: Int): Boolean {
+        var left = size
+        var top = size
+        var right = -1
+        var bottom = -1
+        pixels.forEachIndexed { index, pixel ->
+            if (pixel ushr 24 < VISIBLE_ALPHA) return@forEachIndexed
+            val x = index % size
+            val y = index / size
+            left = minOf(left, x)
+            top = minOf(top, y)
+            right = maxOf(right, x)
+            bottom = maxOf(bottom, y)
+        }
+        if (right < left || bottom < top) return false
+        val width = right - left + 1
+        val height = bottom - top + 1
+        return width * 100 >= size * MIN_SPAN_PERCENT &&
+            height * 100 >= size * MIN_SPAN_PERCENT
+    }
+
+    private fun intersectionOverUnion(sample: IntArray, mask: IntArray): Double {
+        var intersection = 0
+        var union = 0
+        sample.indices.forEach { index ->
+            val sampleVisible = sample[index] ushr 24 >= VISIBLE_ALPHA
+            val maskVisible = mask[index] ushr 24 >= VISIBLE_ALPHA
+            if (sampleVisible && maskVisible) intersection++
+            if (sampleVisible || maskVisible) union++
+        }
+        return if (union == 0) 0.0 else intersection.toDouble() / union
+    }
+
+    private const val VISIBLE_ALPHA = 64
+    private const val MIN_SPAN_PERCENT = 72
+    private const val MIN_SAMPLES = 8
+    private const val MAJORITY_PERCENT = 70
+    private const val MIN_CONSISTENT_PERCENT = 70
+    private const val MIN_SAMPLE_IOU = 0.82
+    private const val WHITE_RGB = 0x00FFFFFF
+}
+
+internal data class InferredIconMask(
+    val size: Int,
+    val pixels: IntArray,
+)
+
+private fun <T> List<T>.sampleEvenly(limit: Int): List<T> {
+    if (size <= limit) return this
+    return List(limit) { index -> this[index * (size - 1) / (limit - 1)] }
 }
 
 internal data class XiaomiThemeFallback(

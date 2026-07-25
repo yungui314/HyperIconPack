@@ -25,16 +25,33 @@ object IconRemoteConfig {
     }
 }
 
+enum class IconAppearance(val storageValue: String) {
+    FOLLOW_SYSTEM("system"),
+    LIGHT("light"),
+    DARK("dark"),
+    ;
+
+    companion object {
+        fun fromStorage(value: String?): IconAppearance = entries.firstOrNull {
+            it.storageValue == value
+        } ?: FOLLOW_SYSTEM
+    }
+}
+
 data class IconPackConfig(
     val packageName: String?,
     /** Final visual calibration for generated, unmapped fallback icons. */
     val fallbackScaleMultiplier: Float = 0.85f,
     /** Offline Monet treatment baked into the generated system theme archive. */
     val globalMonetIcons: Boolean = false,
+    /** Experimental static Liquid Glass treatment, mutually exclusive with Monet. */
+    val liquidGlassIcons: Boolean = false,
     /** Use a fixed two-colour palette instead of the current wallpaper palette. */
     val monetCustomColors: Boolean = false,
     val monetBackgroundColor: Int = DEFAULT_MONET_BACKGROUND_COLOR,
     val monetForegroundColor: Int = DEFAULT_MONET_FOREGROUND_COLOR,
+    /** Resource configuration used while rendering this archive. */
+    val iconAppearance: IconAppearance = IconAppearance.FOLLOW_SYSTEM,
     /** Conversion is always full-device; retained to retire older settings. */
     val conversionAllApplications: Boolean = true,
     /** True only after this module has installed its managed HyperOS icons ZIP. */

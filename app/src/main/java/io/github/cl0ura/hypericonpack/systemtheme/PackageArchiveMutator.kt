@@ -1,6 +1,7 @@
 package io.github.cl0ura.hypericonpack.systemtheme
 
 import android.content.Context
+import io.github.cl0ura.hypericonpack.config.IconAppearance
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -22,10 +23,12 @@ internal object PackageArchiveMutator {
         iconPackPackage: String,
         fallbackScaleMultiplier: Float,
         globalMonetIcons: Boolean,
+        liquidGlassIcons: Boolean = false,
         monetCustomColors: Boolean,
         monetBackgroundColor: Int,
         monetForegroundColor: Int,
         monetPaletteFingerprint: String,
+        iconAppearance: IconAppearance = IconAppearance.FOLLOW_SYSTEM,
         packageNames: Collection<String>,
         preservedEntryNames: Set<String> = emptySet(),
         launchEntryNames: (String) -> List<String>,
@@ -40,10 +43,12 @@ internal object PackageArchiveMutator {
             iconPackPackage = iconPackPackage,
             fallbackScaleMultiplier = fallbackScaleMultiplier,
             globalMonetIcons = globalMonetIcons,
+            liquidGlassIcons = liquidGlassIcons,
             monetCustomColors = monetCustomColors,
             monetBackgroundColor = monetBackgroundColor,
             monetForegroundColor = monetForegroundColor,
             monetPaletteFingerprint = monetPaletteFingerprint,
+            iconAppearance = iconAppearance,
         )
 
         val packagePngs = renderPackages(requestedPackages)
@@ -64,11 +69,13 @@ internal object PackageArchiveMutator {
             iconPackPackage = iconPackPackage,
             fallbackScaleMultiplier = fallbackScaleMultiplier,
             globalMonetIcons = globalMonetIcons,
+            liquidGlassIcons = liquidGlassIcons,
             monetCustomColors = globalMonetIcons && monetCustomColors,
             monetBackgroundColor = monetBackgroundColor,
             monetForegroundColor = monetForegroundColor,
             applicationScopeFingerprint = IconArchiveCache.applicationScopeFingerprint(context),
             monetPaletteFingerprint = monetPaletteFingerprint,
+            iconAppearance = iconAppearance,
         )
         val destination = IconArchiveCache.archiveFile(context, variant, createDirectory = true)
         val temporary = File(destination.parentFile, "${destination.name}.package-update")
@@ -129,6 +136,7 @@ internal object PackageArchiveMutator {
             monetForegroundColor = baseInfo.monetForegroundColor,
             applicationScopeFingerprint = IconArchiveCache.applicationScopeFingerprint(context),
             monetPaletteFingerprint = monetPaletteFingerprint,
+            iconAppearance = baseInfo.iconAppearance,
         )
         val destination = IconArchiveCache.archiveFile(context, variant, createDirectory = true)
         val temporary = File(destination.parentFile, "${destination.name}.package-remove")
@@ -175,14 +183,17 @@ internal object PackageArchiveMutator {
         iconPackPackage: String,
         fallbackScaleMultiplier: Float,
         globalMonetIcons: Boolean,
+        liquidGlassIcons: Boolean,
         monetCustomColors: Boolean,
         monetBackgroundColor: Int,
         monetForegroundColor: Int,
         monetPaletteFingerprint: String,
+        iconAppearance: IconAppearance,
     ) {
         require(baseInfo.isCurrentFormat) { "当前主题归档格式过旧，需要先重新转换一次" }
         require(baseInfo.iconPackPackage == iconPackPackage) { "当前主题来源与活动配置不一致" }
         require(baseInfo.globalMonetIcons == globalMonetIcons) { "当前主题 Monet 配置与活动配置不一致" }
+        require(baseInfo.liquidGlassIcons == liquidGlassIcons) { "当前主题 Liquid Glass 配置与活动配置不一致" }
         require(baseInfo.monetCustomColors == (globalMonetIcons && monetCustomColors)) {
             "当前主题 Monet 配色模式与活动配置不一致"
         }
@@ -193,6 +204,9 @@ internal object PackageArchiveMutator {
         ) { "当前主题 Monet 自定义配色与活动配置不一致" }
         require(baseInfo.monetPaletteFingerprint == monetPaletteFingerprint) {
             "当前主题 Monet 色板与活动配置不一致"
+        }
+        require(baseInfo.iconAppearance == iconAppearance) {
+            "当前主题图标明暗模式与活动配置不一致"
         }
         require(
             baseInfo.fallbackScaleMultiplier?.let {

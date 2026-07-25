@@ -9,6 +9,7 @@ import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
 import io.github.cl0ura.hypericonpack.iconpack.IconPackMapping
+import io.github.cl0ura.hypericonpack.iconpack.InferredIconMask
 import io.github.cl0ura.hypericonpack.iconpack.ParsedIconPack
 
 /** Resolves raw and icon-pack Drawables without owning archive or threading policy. */
@@ -17,8 +18,9 @@ internal class IconDrawableResolver(
     private val pack: ParsedIconPack?,
     private val fallbackScaleMultiplier: Float,
     private val globalMonetIcons: Boolean,
-    private val systemAdaptiveMask: AdaptiveIconDrawable?,
+    private val inferredMonetFallbackMask: InferredIconMask? = null,
 ) {
+    private val unthemedIconLoader = UnthemedApplicationIconLoader(context)
     fun resolveExplicit(
         mapping: IconPackMapping,
         catalog: InstalledAppCatalog,
@@ -90,7 +92,10 @@ internal class IconDrawableResolver(
         fallbackComponent: ComponentName,
     ): Drawable? {
         fun systemShapedRawIcon(): Drawable? = rawIcon?.let { source ->
-            SystemIconShapeDrawable(source = source, systemMask = systemAdaptiveMask)
+            SystemIconShapeDrawable(
+                source = source,
+                inferredMask = inferredMonetFallbackMask.takeIf { globalMonetIcons },
+            )
         }
         val resolvedPack = pack ?: return systemShapedRawIcon()
         mappedPackageDrawable(packageName)?.let { return it }
@@ -116,9 +121,10 @@ internal class IconDrawableResolver(
         val packageManager = context.packageManager
         val resourceId = applicationInfo.icon
         val declared = if (resourceId != 0) {
-            runCatching {
-                packageManager.getDrawable(applicationInfo.packageName, resourceId, applicationInfo)
-            }.getOrNull()
+            unthemedIconLoader.load(applicationInfo, resourceId)
+                ?: runCatching {
+                    packageManager.getDrawable(applicationInfo.packageName, resourceId, applicationInfo)
+                }.getOrNull()
         } else {
             null
         }
@@ -128,13 +134,14 @@ internal class IconDrawableResolver(
     private fun rawActivityIcon(activityInfo: ActivityInfo): Drawable? {
         val resourceId = activityInfo.icon
         return if (resourceId != 0) {
-            runCatching {
-                context.packageManager.getDrawable(
-                    activityInfo.packageName,
-                    resourceId,
-                    activityInfo.applicationInfo,
-                )
-            }.getOrNull()
+            unthemedIconLoader.load(activityInfo.applicationInfo, resourceId)
+                ?: runCatching {
+                    context.packageManager.getDrawable(
+                        activityInfo.packageName,
+                        resourceId,
+                        activityInfo.applicationInfo,
+                    )
+                }.getOrNull()
         } else {
             rawApplicationIcon(activityInfo.applicationInfo)
         }
@@ -148,7 +155,7 @@ internal class IconDrawableResolver(
         val rawSilhouette = adaptiveIcon.constantState?.newDrawable()?.mutate() ?: adaptiveIcon.mutate()
         return NativeMonochromeSource(
             glyph = glyph,
-            silhouette = SystemIconShapeDrawable(source = rawSilhouette, systemMask = null),
+            silhouette = SystemIconShapeDrawable(source = rawSilhouette),
             recoveryDrawable = rawSilhouette,
         )
     }
@@ -161,30 +168,4 @@ internal class IconDrawableResolver(
         } ?: source
     }
 
-    companion object {
-        fun resolveSystemAdaptiveMask(
-            context: Context,
-            applications: List<ApplicationInfo>,
-        ): AdaptiveIconDrawable? {
-            val resolver = IconDrawableResolver(
-                context = context,
-                pack = null,
-                fallbackScaleMultiplier = 1f,
-                globalMonetIcons = false,
-                systemAdaptiveMask = null,
-            )
-            val packageManager = context.packageManager
-            val preferredPackages = listOf("com.miui.home", "com.android.settings", "com.android.systemui")
-            val preferred = preferredPackages.asSequence().mapNotNull { packageName ->
-                applications.firstOrNull { application -> application.packageName == packageName }
-                    ?: runCatching { packageManager.getApplicationInfo(packageName, 0) }.getOrNull()
-            }
-            return (preferred + applications.asSequence())
-                .mapNotNull { application -> resolver.rawApplicationIcon(application) as? AdaptiveIconDrawable }
-                .firstOrNull()
-                ?.let { drawable ->
-                    drawable.constantState?.newDrawable()?.mutate() as? AdaptiveIconDrawable ?: drawable
-                }
-        }
-    }
 }

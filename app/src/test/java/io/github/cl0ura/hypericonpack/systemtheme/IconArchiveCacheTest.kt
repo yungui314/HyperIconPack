@@ -1,5 +1,6 @@
 package io.github.cl0ura.hypericonpack.systemtheme
 
+import io.github.cl0ura.hypericonpack.config.IconAppearance
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
@@ -29,6 +30,14 @@ class IconArchiveCacheTest {
         assertNotEquals(
             IconArchiveCache.cacheKey(systemMonet),
             IconArchiveCache.cacheKey(systemMonet.copy(monetPaletteFingerprint = "palette-b")),
+        )
+        assertNotEquals(
+            IconArchiveCache.cacheKey(systemMonet.copy(iconAppearance = IconAppearance.LIGHT)),
+            IconArchiveCache.cacheKey(systemMonet.copy(iconAppearance = IconAppearance.DARK)),
+        )
+        assertNotEquals(
+            IconArchiveCache.cacheKey(ordinary.copy(iconAppearance = IconAppearance.LIGHT)),
+            IconArchiveCache.cacheKey(ordinary.copy(iconAppearance = IconAppearance.DARK)),
         )
         assertEquals(
             IconArchiveCache.cacheKey(ordinary),
